@@ -1,0 +1,61 @@
+---
+title: Assignment 03
+author:
+  - name: Saurabh Sharma
+    affiliations:
+      - id: bu
+        name: Boston University
+        city: Boston
+        state: MA
+number-sections: true
+date: today
+format:
+  html:
+    theme: cerulean
+    toc: true
+    toc-depth: 2
+date-modified: today
+date-format: long
+execute:
+  echo: true
+  eval: true
+  freeze: auto
+---
+
+## Lab 3 
+
+```{python}
+from pyspark.sql import SparkSession
+
+# Start a Spark session
+spark = SparkSession.builder.appName("JobPostingsAnalysis").getOrCreate()
+
+# Load the CSV file into a Spark DataFrame
+df = spark.read.option("header", "true").option("inferSchema", "true").option("multiLine", "true").option("escape", "\"").csv("data/job_postings.xlsx")
+
+# 3. Register the DataFrame as a temporary SQL table
+df.createOrReplaceTempView("jobs")
+```
+
+```{python}
+# Verify the Data
+
+# Display the first five rows
+df.show(5)
+
+# Show the schema (column names & data types)
+df.printSchema()
+```
+
+```{python}
+# Run a Spark SQL query to count job postings per employment type
+job_counts_by_type = spark.sql("""
+    SELECT EMPLOYMENT_TYPE_NAME, COUNT(*) AS job_count
+    FROM jobs
+    GROUP BY EMPLOYMENT_TYPE_NAME
+    ORDER BY job_count DESC
+""")
+
+# Show the result
+job_counts_by_type.show()
+```
