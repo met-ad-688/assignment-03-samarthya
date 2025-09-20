@@ -1,5 +1,5 @@
 ---
-title: Assignment 03
+title: "Assignment 03: Job Market Analysis with Lightcast Data"
 author:
   - name: Saurabh Sharma
     affiliations:
@@ -11,9 +11,7 @@ number-sections: true
 date: today
 format:
   html:
-    theme: cerulean
-    toc: true
-    toc-depth: 2
+    theme: cosmo    # Alternative without icons
 date-modified: today
 date-format: long
 execute:
@@ -22,40 +20,730 @@ execute:
   freeze: auto
 ---
 
-## Lab 3 
+# Data Loading and Initial Analysis
+
+## Load the Lightcast Dataset
 
 ```{python}
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import *
+from pyspark.sql.types import *
+import plotly.express as px
+import plotly.graph_objects as go
+import plotly.figure_factory as ff
+from plotly.subplots import make_subplots
+import pandas as pd
+import numpy as np
+import base64
+import json
+import re
+import warnings
+import builtins  # To avoid conflict with PySpark max function
+import os
+warnings.filterwarnings('ignore')
+
+# Create images directory if it doesn't exist
+os.makedirs('images', exist_ok=True)
+
+# Install kaleido if needed for image export (run this once)
+# !pip install kaleido
 
 # Start a Spark session
-spark = SparkSession.builder.appName("JobPostingsAnalysis").getOrCreate()
+spark = SparkSession.builder \
+    .appName("JobPostingsAnalysis") \
+    .config("spark.sql.adaptive.enabled", "true") \
+    .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+    .getOrCreate()
 
 # Load the CSV file into a Spark DataFrame
-df = spark.read.option("header", "true").option("inferSchema", "true").option("multiLine", "true").option("escape", "\"").csv("data/job_postings.xlsx")
+df = spark.read.csv("data/lightcast_job_postings.csv", 
+                   header=True, 
+                   inferSchema=True, 
+                   multiLine=True, 
+                   escape="\"")
 
-# 3. Register the DataFrame as a temporary SQL table
+# Register the DataFrame as a temporary SQL table
 df.createOrReplaceTempView("jobs")
+
+print("Dataset loaded successfully!")
+print(f"Total records: {df.count():,}")
+print(f"Total columns: {len(df.columns)}")
 ```
 
+## Data Quality Assessment
+
 ```{python}
-# Verify the Data
-
-# Display the first five rows
-df.show(5)
-
-# Show the schema (column names & data types)
+# Display schema and basic info based on actual structure
+print("=== DATASET SCHEMA ===")
 df.printSchema()
+
+print("\n=== SAMPLE DATA ===")
+df.show(3, truncate=False)
+
+# Check data completeness for key fields
+key_fields = [
+    'TITLE_NAME', 'COMPANY_NAME', 'SALARY', 'SALARY_FROM', 'SALARY_TO',
+    'STATE_NAME', 'CITY_NAME', 'NAICS2_NAME', 'SKILLS_NAME', 
+    'SPECIALIZED_SKILLS_NAME', 'REMOTE_TYPE_NAME'
+]
+
+print("\n=== DATA COMPLETENESS ANALYSIS ===")
+total_records = df.count()
+
+for field in key_fields:
+    if field in df.columns:
+        non_null_count = df.filter(col(field).isNotNull()).count()
+        completeness_pct = (non_null_count / total_records) * 100
+        print(f"{field:25}: {non_null_count:,} ({completeness_pct:.1f}%)")
+```
+
+## Salary Data Preparation
+
+```{python}
+# Prepare salary data with proper handling of the actual schema
+print("=== SALARY DATA PREPARATION ===")
+
+# Create salary dataset with available salary information
+salary_data = df.select(
+    'ID', 'TITLE_NAME', 'COMPANY_NAME', 'STATE_NAME', 'CITY_NAME',
+    'SALARY', 'SALARY_FROM', 'SALARY_TO', 'ORIGINAL_PAY_PERIOD',
+    'NAICS2_NAME', 'NAICS3_NAME', 'SKILLS_NAME', 'SPECIALIZED_SKILLS_NAME',
+    'REMOTE_TYPE_NAME', 'MIN_YEARS_EXPERIENCE', 'MAX_YEARS_EXPERIENCE',
+    'EMPLOYMENT_TYPE_NAME', 'MIN_EDULEVELS_NAME'
+).filter(
+    # Filter for records with any salary information
+    (col('SALARY').isNotNull()) | 
+    (col('SALARY_FROM').isNotNull()) | 
+    (col('SALARY_TO').isNotNull())
+)
+
+# Calculate effective annual salary
+salary_data = salary_data.withColumn(
+    'effective_salary',
+    when(col('SALARY').isNotNull(), col('SALARY'))
+    .when((col('SALARY_FROM').isNotNull()) & (col('SALARY_TO').isNotNull()), 
+          (col('SALARY_FROM') + col('SALARY_TO')) / 2)
+    .when(col('SALARY_FROM').isNotNull(), col('SALARY_FROM'))
+    .when(col('SALARY_TO').isNotNull(), col('SALARY_TO'))
+    .otherwise(None)
+)
+
+# Filter for reasonable salary ranges and remove outliers
+salary_data = salary_data.filter(
+    (col('effective_salary') >= 15000) & 
+    (col('effective_salary') <= 1000000)
+)
+
+# Decode city names (they appear to be base64 encoded)
+def decode_city_name(encoded_string):
+    try:
+        if encoded_string:
+            decoded_bytes = base64.b64decode(encoded_string)
+            return decoded_bytes.decode('utf-8')
+    except:
+        return encoded_string
+    return encoded_string
+
+# Register UDF for city decoding
+decode_city_udf = udf(decode_city_name, StringType())
+salary_data = salary_data.withColumn('decoded_city', decode_city_udf(col('CITY_NAME')))
+
+print(f"Records with salary data: {salary_data.count():,}")
+
+# Convert to Pandas for easier visualization
+salary_df = salary_data.toPandas()  # This loads everything into memory
+
+# Basic statistics
+print(f"\nSalary Statistics:")
+print(f"Mean: ${salary_df['effective_salary'].mean():,.0f}")
+print(f"Median: ${salary_df['effective_salary'].median():,.0f}")
+print(f"25th percentile: ${salary_df['effective_salary'].quantile(0.25):,.0f}")
+print(f"75th percentile: ${salary_df['effective_salary'].quantile(0.75):,.0f}")
+print(f"Standard deviation: ${salary_df['effective_salary'].std():,.0f}")
+```
+
+# Salary Distributions and Industry Analysis
+
+## Overall Salary Distribution
+
+```{python}
+# Custom color palette for consistent styling
+colors = {
+    'primary': '#2E86AB',
+    'secondary': '#A23B72', 
+    'accent': '#F18F01',
+    'success': '#C73E1D',
+    'info': '#592E83',
+    'warning': '#F5A623',
+    'dark': '#1F2937',
+    'light': '#F8FAFC'
+}
+
+# 1. Overall Salary Distribution
+fig1 = go.Figure()
+
+fig1.add_trace(go.Histogram(
+    x=salary_df['effective_salary'],
+    nbinsx=60,
+    name='Salary Distribution',
+    marker_color=colors['primary'],
+    opacity=0.75,
+    hovertemplate='Salary Range: $%{x:,.0f}<br>Count: %{y}<br><extra></extra>'
+))
+
+# Add median line
+median_salary = salary_df['effective_salary'].median()
+fig1.add_vline(
+    x=median_salary,
+    line_dash="dash",
+    line_color=colors['secondary'],
+    line_width=3,
+    annotation_text=f"Median: ${median_salary:,.0f}",
+    annotation_position="top right"
+)
+
+fig1.update_layout(
+    title={
+        'text': 'Distribution of Annual Salaries in 2025 Job Market',
+        'x': 0.5,
+        'font': {'size': 22, 'family': 'Roboto', 'color': colors['dark']}
+    },
+    xaxis_title='Annual Salary (USD)',
+    yaxis_title='Number of Job Postings',
+    font={'family': 'Open Sans', 'size': 12},
+    plot_bgcolor=colors['light'],
+    paper_bgcolor='white',
+    xaxis=dict(
+        gridcolor='rgba(0,0,0,0.1)',
+        tickformat='$,.0f',
+        showgrid=True
+    ),
+    yaxis=dict(
+        gridcolor='rgba(0,0,0,0.1)',
+        showgrid=True
+    ),
+    showlegend=False,
+    height=500
+)
+
+fig1.show(renderer="notebook")
+
+# Save figure to images directory
+fig1.write_html("images/01_salary_distribution.html")
+try:
+    fig1.write_image("images/01_salary_distribution.png", width=1200, height=500, scale=2)
+    print("📊 Figure 1 saved: images/01_salary_distribution.html and .png")
+except Exception as e:
+    print("📊 Figure 1 saved: images/01_salary_distribution.html (PNG failed - install kaleido: pip install kaleido)")
+```
+
+## Industry-Level Salary Analysis
+
+```{python}
+# 2. Salary Analysis by Industry (NAICS2)
+industry_analysis_spark = salary_data.groupBy('NAICS2_NAME').agg(
+    avg('effective_salary').alias('avg_salary'),
+    count('*').alias('job_count')
+).filter(col('job_count') >= 15).orderBy('avg_salary')
+
+# Convert only when needed for plotting
+industry_analysis = industry_analysis_spark.toPandas()
+
+# Filter for industries with meaningful sample sizes
+industry_analysis = industry_analysis[industry_analysis['job_count'] >= 15]
+industry_analysis = industry_analysis.sort_values('avg_salary', ascending=True)
+
+print("=== TOP 10 HIGHEST PAYING INDUSTRIES ===")
+top_industries = industry_analysis.tail(10)
+for _, row in top_industries.iterrows():
+    print(f"{row['NAICS2_NAME']:<40}: ${row['avg_salary']:>8,.0f} (n={row['job_count']:,})")
+
+# Industry salary visualization
+fig2 = go.Figure()
+
+fig2.add_trace(go.Bar(
+    y=industry_analysis['NAICS2_NAME'],
+    x=industry_analysis['avg_salary'],
+    orientation='h',
+    marker_color=colors['accent'],
+    hovertemplate='<b>%{y}</b><br>Average Salary: $%{x:,.0f}<br>Jobs: %{customdata:,}<extra></extra>',
+    customdata=industry_analysis['job_count'],
+    text=industry_analysis['avg_salary'].apply(lambda x: f'${x:,.0f}'),
+    textposition='outside'
+))
+
+fig2.update_layout(
+    title={
+        'text': 'Average Annual Salary by Industry Sector',
+        'x': 0.5,
+        'font': {'size': 20, 'family': 'Roboto', 'color': colors['dark']}
+    },
+    xaxis_title='Average Annual Salary (USD)',
+    yaxis_title='Industry Sector',
+    font={'family': 'Open Sans', 'size': 11},
+    plot_bgcolor=colors['light'],
+    paper_bgcolor='white',
+    height=builtins.max(600, len(industry_analysis) * 25),
+    xaxis=dict(
+        gridcolor='rgba(0,0,0,0.1)',
+        tickformat='$,.0f',
+        showgrid=True
+    ),
+    yaxis=dict(gridcolor='rgba(0,0,0,0.1)'),
+    showlegend=False,
+    margin=dict(l=200)
+)
+
+fig2.show(renderer="notebook")
+
+# Save figure to images directory
+fig2.write_html("images/02_industry_salary_analysis.html")
+try:
+    fig2.write_image("images/02_industry_salary_analysis.png", width=1200, height=800, scale=2)
+    print("📊 Figure 2 saved: images/02_industry_salary_analysis.html and .png")
+except Exception as e:
+    print("📊 Figure 2 saved: images/02_industry_salary_analysis.html (PNG failed - install kaleido: pip install kaleido)")
+```
+
+## Geographic Salary Analysis
+
+```{python}
+# 3. Geographic Analysis by State
+state_analysis = salary_df.groupby('STATE_NAME').agg({
+    'effective_salary': ['mean', 'median', 'count']
+}).round(0)
+
+state_analysis.columns = ['avg_salary', 'median_salary', 'job_count']
+state_analysis = state_analysis.reset_index()
+state_analysis = state_analysis[state_analysis['job_count'] >= 25]  # Filter for meaningful samples
+state_analysis = state_analysis.sort_values('job_count', ascending=False).head(20)  # Top 20 states
+
+print("\n=== TOP STATES BY JOB COUNT AND AVERAGE SALARY ===")
+for _, row in state_analysis.head(10).iterrows():
+    print(f"{row['STATE_NAME']:<15}: {row['job_count']:>4,} jobs | ${row['avg_salary']:>8,.0f} avg")
+
+# Create subplot for state analysis
+fig3 = make_subplots(
+    rows=1, cols=2,
+    subplot_titles=('Job Volume by State', 'Average Salary by State'),
+    horizontal_spacing=0.15
+)
+
+# Job count by state
+fig3.add_trace(
+    go.Bar(
+        x=state_analysis['STATE_NAME'],
+        y=state_analysis['job_count'],
+        name='Job Count',
+        marker_color=colors['info'],
+        hovertemplate='State: %{x}<br>Jobs: %{y:,}<extra></extra>'
+    ),
+    row=1, col=1
+)
+
+# Average salary by state
+fig3.add_trace(
+    go.Bar(
+        x=state_analysis['STATE_NAME'],
+        y=state_analysis['avg_salary'],
+        name='Avg Salary',
+        marker_color=colors['success'],
+        hovertemplate='State: %{x}<br>Avg Salary: $%{y:,.0f}<extra></extra>'
+    ),
+    row=1, col=2
+)
+
+fig3.update_layout(
+    title={
+        'text': 'Geographic Distribution: Job Volume vs Average Salaries',
+        'x': 0.5,
+        'font': {'size': 18, 'family': 'Roboto', 'color': colors['dark']}
+    },
+    font={'family': 'Open Sans', 'size': 10},
+    plot_bgcolor=colors['light'],
+    paper_bgcolor='white',
+    height=600,
+    showlegend=False
+)
+
+fig3.update_xaxes(tickangle=45, row=1, col=1)
+fig3.update_xaxes(tickangle=45, row=1, col=2)
+fig3.update_yaxes(title_text="Number of Jobs", row=1, col=1)
+fig3.update_yaxes(title_text="Average Salary ($)", tickformat='$,.0f', row=1, col=2)
+
+fig3.show(renderer="notebook")
+
+# Save figure to images directory
+fig3.write_html("images/03_geographic_analysis.html")
+try:
+    fig3.write_image("images/03_geographic_analysis.png", width=1400, height=600, scale=2)
+    print("📊 Figure 3 saved: images/03_geographic_analysis.html and .png")
+except Exception as e:
+    print("📊 Figure 3 saved: images/03_geographic_analysis.html (PNG failed - install kaleido: pip install kaleido)")
+```
+
+# Skills Analysis and AI vs Traditional Roles
+
+## Skills Data Processing
+
+```{python}
+# 4. Skills Analysis - Process skills data
+print("=== PROCESSING SKILLS DATA ===")
+
+# Helper function to parse skills from string arrays
+def parse_skills_array(skills_str):
+    """Parse skills from array-like string format"""
+    if pd.isna(skills_str) or not skills_str:
+        return []
+    
+    try:
+        # Clean the string and extract skills
+        # Handle format like: [\n  "Skill1",\n  "Skill2"\n]
+        cleaned = re.sub(r'[\[\]\\n"]', '', str(skills_str))
+        skills = [skill.strip() for skill in cleaned.split(',') if skill.strip() and len(skill.strip()) > 2]
+        return skills
+    except:
+        return []
+
+# Apply skills parsing to create expanded dataset
+skills_expanded = []
+for idx, row in salary_df.iterrows():
+    # Parse different skill categories
+    general_skills = parse_skills_array(row['SKILLS_NAME'])
+    specialized_skills = parse_skills_array(row['SPECIALIZED_SKILLS_NAME'])
+    
+    all_skills = general_skills + specialized_skills
+    
+    for skill in all_skills:
+        skills_expanded.append({
+            'ID': row['ID'],
+            'skill': skill,
+            'skill_category': 'specialized' if skill in specialized_skills else 'general',
+            'salary': row['effective_salary'],
+            'title': row['TITLE_NAME'],
+            'industry': row['NAICS2_NAME'],
+            'state': row['STATE_NAME'],
+            'experience_min': row['MIN_YEARS_EXPERIENCE'],
+            'experience_max': row['MAX_YEARS_EXPERIENCE']
+        })
+
+skills_df = pd.DataFrame(skills_expanded)
+print(f"Total skill-job combinations: {len(skills_df):,}")
+
+# Analyze most common skills
+skill_summary = skills_df.groupby('skill').agg({
+    'salary': ['mean', 'median', 'count'],
+    'ID': 'nunique'
+}).round(0)
+
+skill_summary.columns = ['avg_salary', 'median_salary', 'skill_mentions', 'unique_jobs']
+skill_summary = skill_summary.reset_index()
+
+# Filter for skills with significant presence
+skill_summary = skill_summary[skill_summary['skill_mentions'] >= 10]
+
+# Display top skills by average salary
+print("\n=== TOP SKILLS BY AVERAGE SALARY ===")
+top_skills = skill_summary.sort_values('avg_salary', ascending=False).head(10)
+for _, row in top_skills.iterrows():
+    print(f"{row['skill']:30}: ${row['avg_salary']:>8,.0f} (mentions: {row['skill_mentions']}, jobs: {row['unique_jobs']})")
+
+# Display top skills by frequency
+print("\n=== MOST FREQUENTLY MENTIONED SKILLS ===")
+top_skills_freq = skill_summary.sort_values('skill_mentions', ascending=False).head(10)
+for _, row in top_skills_freq.iterrows():
+    print(f"{row['skill']:30}: {row['skill_mentions']} mentions")
+```
+
+## Skills Visualization
+
+```{python}
+# 5. Skills Visualization - Salary vs. Skill Frequency
+fig4 = go.Figure()
+
+# Scatter plot for skill analysis
+fig4.add_trace(go.Scatter(
+    x=skill_summary['avg_salary'],
+    y=skill_summary['skill_mentions'],
+    mode='markers',
+    marker=dict(
+        size=10,
+        color=colors['primary'],
+        opacity=0.7,
+        line=dict(width=1, color=colors['dark'])
+    ),
+    text=skill_summary['skill'],
+    hovertemplate='<b>%{text}</b><br>Average Salary: $%{x:,.0f}<br>Mentions: %{y}<extra></extra>'
+))
+
+fig4.update_layout(
+    title={
+        'text': 'Skills Analysis: Salary vs Frequency of Mention',
+        'x': 0.5,
+        'font': {'size': 20, 'family': 'Roboto', 'color': colors['dark']}
+    },
+    xaxis_title='Average Salary (USD)',
+    yaxis_title='Number of Mentions',
+    font={'family': 'Open Sans', 'size': 11},
+    plot_bgcolor=colors['light'],
+    paper_bgcolor='white',
+    height=600,
+    xaxis=dict(
+        gridcolor='rgba(0,0,0,0.1)',
+        tickformat='$,.0f',
+        showgrid=True
+    ),
+    yaxis=dict(
+        gridcolor='rgba(0,0,0,0.1)',
+        showgrid=True
+    ),
+    margin=dict(l=40, r=40, t=40, b=40)
+)
+
+fig4.show(renderer="notebook")
+
+# Save figure to images directory
+fig4.write_html("images/04_skills_analysis.html")
+try:
+    fig4.write_image("images/04_skills_analysis.png", width=1200, height=600, scale=2)
+    print("📊 Figure 4 saved: images/04_skills_analysis.html and .png")
+except Exception as e:
+    print("📊 Figure 4 saved: images/04_skills_analysis.html (PNG failed - install kaleido: pip install kaleido)")
+```
+
+## AI Skills Demand Analysis
+
+```{python}
+# 6. AI Skills Demand Analysis - Focus on AI-related skills
+ai_skills = [
+    'artificial intelligence', 'machine learning', 'deep learning', 
+    'data science', 'python', 'r', 'sql', 'java', 'c++', 
+    'tensorflow', 'pytorch', 'scikit-learn', 'nlp', 'natural language processing',
+    'computer vision', 'keras', 'hadoop', 'spark', 'aws', 'azure', 'google cloud'
+]
+
+# Normalize AI skills for matching
+normalized_ai_skills = [skill.lower() for skill in ai_skills]
+
+# Filter skills_df for AI-related skills
+ai_skills_df = skills_df[skills_df['skill'].str.lower().isin(normalized_ai_skills)]
+
+print(f"Total AI-related skill-job combinations: {len(ai_skills_df):,}")
+
+# Analyze AI skills impact on salary
+ai_salary_impact = ai_skills_df.groupby('skill').agg({
+    'salary': ['mean', 'median', 'count'],
+    'ID': 'nunique'
+}).round(0)
+
+ai_salary_impact.columns = ['avg_salary', 'median_salary', 'skill_mentions', 'unique_jobs']
+ai_salary_impact = ai_salary_impact.reset_index()
+
+# Filter for AI skills with significant presence
+ai_salary_impact = ai_salary_impact[ai_salary_impact['skill_mentions'] >= 10]
+
+# Display AI skills by average salary
+print("\n=== AI-RELATED SKILLS BY AVERAGE SALARY ===")
+top_ai_skills = ai_salary_impact.sort_values('avg_salary', ascending=False).head(10)
+for _, row in top_ai_skills.iterrows():
+    print(f"{row['skill']:30}: ${row['avg_salary']:>8,.0f} (mentions: {row['skill_mentions']}, jobs: {row['unique_jobs']})")
+
+# Display AI skills by frequency
+print("\n=== AI-RELATED SKILLS BY FREQUENCY OF MENTION ===")
+top_ai_skills_freq = ai_salary_impact.sort_values('skill_mentions', ascending=False).head(10)
+for _, row in top_ai_skills_freq.iterrows():
+    print(f"{row['skill']:30}: {row['skill_mentions']} mentions")
+```
+
+## AI Skills Visualization
+
+```{python}
+# 7. AI Skills Visualization - Salary vs. Skill Frequency for AI Skills
+fig5 = go.Figure()
+
+# Scatter plot for AI skill analysis
+fig5.add_trace(go.Scatter(
+    x=ai_salary_impact['avg_salary'],
+    y=ai_salary_impact['skill_mentions'],
+    mode='markers',
+    marker=dict(
+        size=10,
+        color=colors['success'],
+        opacity=0.7,
+        line=dict(width=1, color=colors['dark'])
+    ),
+    text=ai_salary_impact['skill'],
+    hovertemplate='<b>%{text}</b><br>Average Salary: $%{x:,.0f}<br>Mentions: %{y}<extra></extra>'
+))
+
+fig5.update_layout(
+    title={
+        'text': 'AI Skills Analysis: Salary vs Frequency of Mention',
+        'x': 0.5,
+        'font': {'size': 20, 'family': 'Roboto', 'color': colors['dark']}
+    },
+    xaxis_title='Average Salary (USD)',
+    yaxis_title='Number of Mentions',
+    font={'family': 'Open Sans', 'size': 11},
+    plot_bgcolor=colors['light'],
+    paper_bgcolor='white',
+    height=600,
+    xaxis=dict(
+        gridcolor='rgba(0,0,0,0.1)',
+        tickformat='$,.0f',
+        showgrid=True
+    ),
+    yaxis=dict(
+        gridcolor='rgba(0,0,0,0.1)',
+        showgrid=True
+    ),
+    margin=dict(l=40, r=40, t=40, b=40)
+)
+
+fig5.show(renderer="notebook")
+
+# Save figure to images directory
+fig5.write_html("images/05_ai_skills_analysis.html")
+try:
+    fig5.write_image("images/05_ai_skills_analysis.png", width=1200, height=600, scale=2)
+    print("📊 Figure 5 saved: images/05_ai_skills_analysis.html and .png")
+except Exception as e:
+    print("📊 Figure 5 saved: images/05_ai_skills_analysis.html (PNG failed - install kaleido: pip install kaleido)")
+```
+
+## AI vs Traditional Skills Comparison
+
+```{python}
+# 8. AI vs Traditional Skills Comparison - Salary and Demand
+traditional_skills = [
+    'project management', 'communication', 'teamwork', 'problem solving', 
+    'adaptability', 'creativity', 'critical thinking', 'time management', 
+    'leadership', 'interpersonal skills', 'negotiation', 'conflict resolution'
+]
+
+# Normalize traditional skills for matching
+normalized_traditional_skills = [skill.lower() for skill in traditional_skills]
+
+# Filter skills_df for traditional skills
+traditional_skills_df = skills_df[skills_df['skill'].str.lower().isin(normalized_traditional_skills)]
+
+print(f"Total traditional skill-job combinations: {len(traditional_skills_df):,}")
+
+# Analyze traditional skills impact on salary
+traditional_salary_impact = traditional_skills_df.groupby('skill').agg({
+    'salary': ['mean', 'median', 'count'],
+    'ID': 'nunique'
+}).round(0)
+
+traditional_salary_impact.columns = ['avg_salary', 'median_salary', 'skill_mentions', 'unique_jobs']
+traditional_salary_impact = traditional_salary_impact.reset_index()
+
+# Filter for traditional skills with significant presence
+traditional_salary_impact = traditional_salary_impact[traditional_salary_impact['skill_mentions'] >= 10]
+
+# Display traditional skills by average salary
+print("\n=== TRADITIONAL SKILLS BY AVERAGE SALARY ===")
+top_traditional_skills = traditional_salary_impact.sort_values('avg_salary', ascending=False).head(10)
+for _, row in top_traditional_skills.iterrows():
+    print(f"{row['skill']:30}: ${row['avg_salary']:>8,.0f} (mentions: {row['skill_mentions']}, jobs: {row['unique_jobs']})")
+
+# Display traditional skills by frequency
+print("\n=== TRADITIONAL SKILLS BY FREQUENCY OF MENTION ===")
+top_traditional_skills_freq = traditional_salary_impact.sort_values('skill_mentions', ascending=False).head(10)
+for _, row in top_traditional_skills_freq.iterrows():
+    print(f"{row['skill']:30}: {row['skill_mentions']} mentions")
+```
+
+## AI vs Traditional Skills Visualization
+
+```{python}
+# 9. AI vs Traditional Skills Visualization - Salary and Demand Comparison
+fig6 = go.Figure()
+
+# AI skills trace
+fig6.add_trace(go.Scatter(
+    x=ai_salary_impact['avg_salary'],
+    y=ai_salary_impact['skill_mentions'],
+    mode='markers',
+    marker=dict(
+        size=10,
+        color=colors['success'],
+        opacity=0.7,
+        line=dict(width=1, color=colors['dark'])
+    ),
+    name='AI Skills',
+    text=ai_salary_impact['skill'],
+    hovertemplate='<b>AI: %{text}</b><br>Average Salary: $%{x:,.0f}<br>Mentions: %{y}<extra></extra>'
+))
+
+# Traditional skills trace
+fig6.add_trace(go.Scatter(
+    x=traditional_salary_impact['avg_salary'],
+    y=traditional_salary_impact['skill_mentions'],
+    mode='markers',
+    marker=dict(
+        size=10,
+        color=colors['warning'],
+        opacity=0.7,
+        line=dict(width=1, color=colors['dark'])
+    ),
+    name='Traditional Skills',
+    text=traditional_salary_impact['skill'],
+    hovertemplate='<b>Traditional: %{text}</b><br>Average Salary: $%{x:,.0f}<br>Mentions: %{y}<extra></extra>'
+))
+
+fig6.update_layout(
+    title={
+        'text': 'AI vs Traditional Skills: Salary and Demand Comparison',
+        'x': 0.5,
+        'font': {'size': 20, 'family': 'Roboto', 'color': colors['dark']}
+    },
+    xaxis_title='Average Salary (USD)',
+    yaxis_title='Number of Mentions',
+    font={'family': 'Open Sans', 'size': 11},
+    plot_bgcolor=colors['light'],
+    paper_bgcolor='white',
+    height=600,
+    xaxis=dict(
+        gridcolor='rgba(0,0,0,0.1)',
+        tickformat='$,.0f',
+        showgrid=True
+    ),
+    yaxis=dict(
+        gridcolor='rgba(0,0,0,0.1)',
+        showgrid=True
+    ),
+    margin=dict(l=40, r=40, t=40, b=40),
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="center",
+        x=0.5
+    )
+)
+
+fig6.show(renderer="notebook")
+
+# Save figure to images directory
+fig6.write_html("images/06_ai_vs_traditional_skills_analysis.html")
+try:
+    fig6.write_image("images/06_ai_vs_traditional_skills_analysis.png", width=1200, height=600, scale=2)
+    print("📊 Figure 6 saved: images/06_ai_vs_traditional_skills_analysis.html and .png")
+except Exception as e:
+    print("📊 Figure 6 saved: images/06_ai_vs_traditional_skills_analysis.html (PNG failed - install kaleido: pip install kaleido)")
 ```
 
 ```{python}
-# Run a Spark SQL query to count job postings per employment type
-job_counts_by_type = spark.sql("""
-    SELECT EMPLOYMENT_TYPE_NAME, COUNT(*) AS job_count
-    FROM jobs
-    GROUP BY EMPLOYMENT_TYPE_NAME
-    ORDER BY job_count DESC
-""")
-
-# Show the result
-job_counts_by_type.show()
+def save_plotly_figure(fig, filename_base, width=1200, height=500):
+    """Save Plotly figure as HTML and PNG with error handling."""
+    html_path = f"images/{filename_base}.html"
+    png_path = f"images/{filename_base}.png"
+    
+    fig.write_html(html_path)
+    try:
+        fig.write_image(png_path, width=width, height=height, scale=2)
+        print(f"✅ Figure saved: {html_path} and {png_path}")
+    except Exception as e:
+        print(f"⚠️  Figure saved: {html_path} (PNG failed: {e})")
 ```
