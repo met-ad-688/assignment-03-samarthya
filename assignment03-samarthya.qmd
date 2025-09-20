@@ -11,7 +11,7 @@ number-sections: true
 date: today
 format:
   html:
-    theme: cosmo    # Alternative without icons
+    theme: cosmo
 date-modified: today
 date-format: long
 execute:
@@ -232,9 +232,9 @@ fig1.show(renderer="notebook")
 fig1.write_html("images/01_salary_distribution.html")
 try:
     fig1.write_image("images/01_salary_distribution.png", width=1200, height=500, scale=2)
-    print("📊 Figure 1 saved: images/01_salary_distribution.html and .png")
+    print("Figure 1 saved: images/01_salary_distribution.html and .png")
 except Exception as e:
-    print("📊 Figure 1 saved: images/01_salary_distribution.html (PNG failed - install kaleido: pip install kaleido)")
+    print("Figure 1 saved: images/01_salary_distribution.html (PNG failed - install kaleido: pip install kaleido)")
 ```
 
 ## Industry-Level Salary Analysis
@@ -300,9 +300,9 @@ fig2.show(renderer="notebook")
 fig2.write_html("images/02_industry_salary_analysis.html")
 try:
     fig2.write_image("images/02_industry_salary_analysis.png", width=1200, height=800, scale=2)
-    print("📊 Figure 2 saved: images/02_industry_salary_analysis.html and .png")
+    print("Figure 2 saved: images/02_industry_salary_analysis.html and .png")
 except Exception as e:
-    print("📊 Figure 2 saved: images/02_industry_salary_analysis.html (PNG failed - install kaleido: pip install kaleido)")
+    print("Figure 2 saved: images/02_industry_salary_analysis.html (PNG failed - install kaleido: pip install kaleido)")
 ```
 
 ## Geographic Salary Analysis
@@ -377,9 +377,9 @@ fig3.show(renderer="notebook")
 fig3.write_html("images/03_geographic_analysis.html")
 try:
     fig3.write_image("images/03_geographic_analysis.png", width=1400, height=600, scale=2)
-    print("📊 Figure 3 saved: images/03_geographic_analysis.html and .png")
+    print("Figure 3 saved: images/03_geographic_analysis.html and .png")
 except Exception as e:
-    print("📊 Figure 3 saved: images/03_geographic_analysis.html (PNG failed - install kaleido: pip install kaleido)")
+    print("Figure 3 saved: images/03_geographic_analysis.html (PNG failed - install kaleido: pip install kaleido)")
 ```
 
 # Skills Analysis and AI vs Traditional Roles
@@ -506,9 +506,9 @@ fig4.show(renderer="notebook")
 fig4.write_html("images/04_skills_analysis.html")
 try:
     fig4.write_image("images/04_skills_analysis.png", width=1200, height=600, scale=2)
-    print("📊 Figure 4 saved: images/04_skills_analysis.html and .png")
+    print("Figure 4 saved: images/04_skills_analysis.html and .png")
 except Exception as e:
-    print("📊 Figure 4 saved: images/04_skills_analysis.html (PNG failed - install kaleido: pip install kaleido)")
+    print("Figure 4 saved: images/04_skills_analysis.html (PNG failed - install kaleido: pip install kaleido)")
 ```
 
 ## AI Skills Demand Analysis
@@ -606,9 +606,9 @@ fig5.show(renderer="notebook")
 fig5.write_html("images/05_ai_skills_analysis.html")
 try:
     fig5.write_image("images/05_ai_skills_analysis.png", width=1200, height=600, scale=2)
-    print("📊 Figure 5 saved: images/05_ai_skills_analysis.html and .png")
+    print("Figure 5 saved: images/05_ai_skills_analysis.html and .png")
 except Exception as e:
-    print("📊 Figure 5 saved: images/05_ai_skills_analysis.html (PNG failed - install kaleido: pip install kaleido)")
+    print("Figure 5 saved: images/05_ai_skills_analysis.html (PNG failed - install kaleido: pip install kaleido)")
 ```
 
 ## AI vs Traditional Skills Comparison
@@ -729,9 +729,9 @@ fig6.show(renderer="notebook")
 fig6.write_html("images/06_ai_vs_traditional_skills_analysis.html")
 try:
     fig6.write_image("images/06_ai_vs_traditional_skills_analysis.png", width=1200, height=600, scale=2)
-    print("📊 Figure 6 saved: images/06_ai_vs_traditional_skills_analysis.html and .png")
+    print("Figure 6 saved: images/06_ai_vs_traditional_skills_analysis.html and .png")
 except Exception as e:
-    print("📊 Figure 6 saved: images/06_ai_vs_traditional_skills_analysis.html (PNG failed - install kaleido: pip install kaleido)")
+    print("Figure 6 saved: images/06_ai_vs_traditional_skills_analysis.html (PNG failed - install kaleido: pip install kaleido)")
 ```
 
 ```{python}
@@ -743,7 +743,7 @@ def save_plotly_figure(fig, filename_base, width=1200, height=500):
     fig.write_html(html_path)
     try:
         fig.write_image(png_path, width=width, height=height, scale=2)
-        print(f"✅ Figure saved: {html_path} and {png_path}")
+        print(f"Figure saved: {html_path} and {png_path}")
     except Exception as e:
-        print(f"⚠️  Figure saved: {html_path} (PNG failed: {e})")
+        print(f"Figure saved: {html_path} (PNG failed: {e})")
 ```
