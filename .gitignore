@@ -4,7 +4,12 @@ __pycache__/
 *$py.class
 
 venv/
-assignment03-
+assignment03-samarthya_files/
+another-version_files/
+data/
+images/
+artifacts/
+
 # C extensions
 *.so
 
