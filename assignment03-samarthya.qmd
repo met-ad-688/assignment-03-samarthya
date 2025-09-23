@@ -415,48 +415,85 @@ else:
     print(f"   • COMPANY_NAME column not found")
 
 
-# Rule 2: Impute missing SALARY values with median (group-specific imputation)
-print(f"\nRule 2: Imputing missing salary values with group-specific medians")
+# Rule 2: Impute missing SALARY values with occupation + employment type specific medians
+print(f"\nRule 2: Imputing missing salary values with occupation + employment type specific medians")
 salary_columns_to_impute = ['SALARY', 'SALARY_FROM', 'SALARY_TO']
 
 for salary_col in salary_columns_to_impute:
     if salary_col in df_clean.columns:
         try:
-            # Calculate median by EMPLOYMENT_TYPE_NAME for more accurate imputation
-            group_medians = df_clean.filter(col(salary_col).isNotNull() & (col(salary_col) > 0)) \
-                .groupBy("EMPLOYMENT_TYPE_NAME") \
+            # First, clean extreme outliers and unrealistic values
+            print(f"   • Cleaning extreme outliers and unrealistic values for {salary_col}")
+            df_clean = df_clean.withColumn(salary_col,
+                when((col(salary_col) < 15000) | (col(salary_col) > 500000),  # Remove unrealistic salaries
+                     None)
+                .otherwise(col(salary_col))
+            )
+            
+            # Calculate median by LOT_OCCUPATION_NAME + EMPLOYMENT_TYPE_NAME for more accurate imputation
+            occupation_employment_medians = df_clean.filter(
+                (col(salary_col).isNotNull()) & (col(salary_col) > 0) &
+                (col("LOT_OCCUPATION_NAME").isNotNull()) &
+                (col("EMPLOYMENT_TYPE_NAME").isNotNull())
+            ).groupBy("LOT_OCCUPATION_NAME", "EMPLOYMENT_TYPE_NAME") \
                 .agg(median(salary_col).alias("group_median")) \
                 .filter(col("group_median").isNotNull())
 
-            # Convert to dict for lookup
-            median_dict = {row["EMPLOYMENT_TYPE_NAME"]: row["group_median"] for row in group_medians.collect()}
+            # Convert to dict for lookup with composite key
+            occupation_employment_dict = {
+                (row["LOT_OCCUPATION_NAME"], row["EMPLOYMENT_TYPE_NAME"]): row["group_median"] 
+                for row in occupation_employment_medians.collect()
+            }
+            
+            # Calculate fallback medians by employment type only
+            employment_medians = df_clean.filter(
+                (col(salary_col).isNotNull()) & (col(salary_col) > 0) &
+                (col("EMPLOYMENT_TYPE_NAME").isNotNull())
+            ).groupBy("EMPLOYMENT_TYPE_NAME") \
+                .agg(median(salary_col).alias("group_median")) \
+                .filter(col("group_median").isNotNull())
+                
+            employment_dict = {
+                row["EMPLOYMENT_TYPE_NAME"]: row["group_median"] 
+                for row in employment_medians.collect()
+            }
 
-            # Get overall median as fallback
+            # Get overall median as final fallback
             overall_median = df_clean.filter(col(salary_col).isNotNull() & (col(salary_col) > 0)) \
                 .approxQuantile(salary_col, [0.5], 0.01)[0]
 
             print(f"   • {salary_col} overall median: ${overall_median:,.2f}")
-            print(f"   • Group-specific medians calculated for {len(median_dict)} employment types")
+            print(f"   • Occupation+Employment specific medians: {len(occupation_employment_dict)} combinations")
+            print(f"   • Employment type fallback medians: {len(employment_dict)} types")
 
-            # Function to get appropriate median
-            def get_median(employment_type):
-                return median_dict.get(employment_type, overall_median)
+            # Function to get most appropriate median (hierarchical fallback)
+            def get_occupation_employment_median(occupation, employment_type):
+                # Try occupation + employment type first
+                composite_key = (occupation, employment_type)
+                if composite_key in occupation_employment_dict:
+                    return occupation_employment_dict[composite_key]
+                # Fallback to employment type only
+                elif employment_type in employment_dict:
+                    return employment_dict[employment_type]
+                # Final fallback to overall median
+                else:
+                    return overall_median
 
             # Register UDF for imputation
             from pyspark.sql.functions import udf
             from pyspark.sql.types import FloatType
-            get_median_udf = udf(get_median, FloatType())
+            get_median_udf = udf(get_occupation_employment_median, FloatType())
 
-            # Apply imputation
+            # Apply improved imputation
             df_clean = df_clean.withColumn(salary_col,
                 when((col(salary_col).isNull()) | (col(salary_col) <= 0),
-                     get_median_udf(col("EMPLOYMENT_TYPE_NAME")))
+                     get_median_udf(col("LOT_OCCUPATION_NAME"), col("EMPLOYMENT_TYPE_NAME")))
                 .otherwise(col(salary_col))
             )
 
             # Count how many values were imputed
             imputed_count = df_clean.filter((col(salary_col).isNull()) | (col(salary_col) <= 0)).count()
-            print(f"   • Imputed {imputed_count:,} missing/invalid {salary_col} values with group-specific medians")
+            print(f"   • Imputed {imputed_count:,} missing/invalid {salary_col} values with occupation-specific medians")
 
         except Exception as e:
             print(f"   • Error in group-specific imputation for {salary_col}: {str(e)}")
@@ -1125,59 +1162,98 @@ ORDER BY n DESC
 #| label: fig-onet-bubble
 #| fig-cap: "Enhanced interactive bubble chart analyzing salary patterns by ONET occupation types. Bubble size represents job volume, color indicates industry diversity, and position shows median salary. The visualization reveals that specialized technical and management occupations command the highest salaries with substantial market demand, while also showing the cross-industry applicability of different roles through color coding."
 
-# Enhanced ONET occupation analysis with multiple dimensions
+# Enhanced LOT occupation analysis with IMPROVED salary imputation verification
 from pyspark.sql.functions import countDistinct
 
-onet_salary_spark = df.select(
-    "ONET_NAME",
-    "SALARY_FROM",
+# STEP 1: First verify salary diversity after improved imputation
+print("=== VERIFYING SALARY DIVERSITY AFTER IMPROVED IMPUTATION ===")
+
+salary_diversity_check = df.select("LOT_OCCUPATION_NAME", "EMPLOYMENT_TYPE_NAME", "SALARY_FROM", "SALARY_TO").filter(
+    (col("LOT_OCCUPATION_NAME").isNotNull()) &
+    (col("EMPLOYMENT_TYPE_NAME").isNotNull()) &
+    (col("SALARY_FROM").isNotNull()) & (col("SALARY_TO").isNotNull()) &
+    (col("SALARY_FROM") > 0) & (col("SALARY_TO") > 0)
+).groupBy("LOT_OCCUPATION_NAME", "EMPLOYMENT_TYPE_NAME").agg(
+    median((col("SALARY_FROM") + col("SALARY_TO")) / 2).alias("median_salary"),
+    count("*").alias("job_count")
+).filter(col("job_count") >= 3).orderBy(col("median_salary").desc())
+
+diversity_sample = salary_diversity_check.limit(10).toPandas()
+print("Sample salary diversity by occupation + employment type:")
+for _, row in diversity_sample.iterrows():
+    print(f"  {row['LOT_OCCUPATION_NAME']:<30} | {row['EMPLOYMENT_TYPE_NAME']:<15} | ${row['median_salary']:>8,.0f}")
+
+# Check overall salary range
+salary_range = df.select("SALARY_FROM", "SALARY_TO").filter(
+    (col("SALARY_FROM").isNotNull()) & (col("SALARY_TO").isNotNull()) &
+    (col("SALARY_FROM") > 0) & (col("SALARY_TO") > 0)
+).agg(
+    median("SALARY_FROM").alias("median_from"),
+    median("SALARY_TO").alias("median_to")
+).collect()[0]
+
+print(f"\nOverall salary range medians: ${salary_range['median_from']:,.0f} - ${salary_range['median_to']:,.0f}")
+
+# STEP 2: Apply lenient filtering for LOT occupation analysis
+lot_occupation_spark = df.select(
+    "LOT_OCCUPATION_NAME",
+    "SALARY_FROM", 
+    "SALARY_TO",
     "NAICS2_NAME",
     "EMPLOYMENT_TYPE_NAME",
-    "MIN_EDULEVELS_NAME",
-    "REMOTE_TYPE_NAME",
     "MIN_YEARS_EXPERIENCE",
     "MAX_YEARS_EXPERIENCE"
 ).filter(
-    (col("ONET_NAME").isNotNull()) &
+    (col("LOT_OCCUPATION_NAME").isNotNull()) &
     (col("SALARY_FROM").isNotNull()) &
+    (col("SALARY_TO").isNotNull()) &
     (col("SALARY_FROM") > 0) &
-    (col("SALARY_FROM") < 500000) &  # Filter out extreme outliers
-    (col("NAICS2_NAME").isNotNull()) &
-    (col("EMPLOYMENT_TYPE_NAME").isNotNull())
-).groupBy("ONET_NAME").agg(
-    median("SALARY_FROM").alias("median_salary"),
-    avg("SALARY_FROM").alias("avg_salary"),
+    (col("SALARY_TO") > 0) &
+    (col("SALARY_FROM") <= 300000) &  # Keep reasonable salary cap
+    (col("SALARY_TO") <= 300000)
+    # Removed industry and employment type filters for maximum diversity
+).withColumn(
+    "avg_salary_range", (col("SALARY_FROM") + col("SALARY_TO")) / 2
+).groupBy("LOT_OCCUPATION_NAME").agg(
+    median("avg_salary_range").alias("median_salary"),
+    avg("avg_salary_range").alias("avg_salary"), 
     count("*").alias("job_count"),
     countDistinct("NAICS2_NAME").alias("industry_diversity"),
     countDistinct("EMPLOYMENT_TYPE_NAME").alias("employment_diversity"),
     avg("MIN_YEARS_EXPERIENCE").alias("avg_min_experience"),
     avg("MAX_YEARS_EXPERIENCE").alias("avg_max_experience")
 ).filter(
-    col("job_count") >= 20  # Increased minimum for better data quality
-).orderBy(col("median_salary").desc())
+    col("job_count") >= 3  # Very low threshold for maximum diversity
+).orderBy(col("job_count").desc())  # Order by job count, not salary
+
+# Create one_Salary_spark as requested
+one_Salary_spark = lot_occupation_spark
 
 # Convert to Pandas
-onet_pd = onet_salary_spark.toPandas()
+lot_occupation_pd = lot_occupation_spark.toPandas()
 
-# Take top 15 occupations for better visualization (reduced from 25)
-onet_top = onet_pd.head(15)
+# Show TOP 25 for maximum diversity
+onet_top = lot_occupation_pd.head(25)
 
-print(f"Enhanced ONET analysis with {len(onet_top)} occupations")
-print("Top 5 occupations by median salary:")
-for _, row in onet_top.head(5).iterrows():
-    print(f"  {row['ONET_NAME']}: ${row['median_salary']:,.0f} (n={row['job_count']:,})")
+print(f"\n=== FINAL RESULTS WITH IMPROVED IMPUTATION ===")
+print(f"Total LOT occupation categories found: {len(lot_occupation_pd)}")
+print(f"Showing top {len(onet_top)} LOT occupations by job count:")
+print("=" * 80)
+for i, (_, row) in enumerate(onet_top.iterrows(), 1):
+    print(f"{i:2d}. {row['LOT_OCCUPATION_NAME']:<35} | {row['job_count']:>6,} jobs | ${row['median_salary']:>8,.0f}")
 
-# Debug: Check data quality
-print(f"\nData quality check:")
-print(f"Median salary range: ${onet_top['median_salary'].min():,.0f} - ${onet_top['median_salary'].max():,.0f}")
-print(f"Job count range: {onet_top['job_count'].min():,} - {onet_top['job_count'].max():,}")
-print(f"Industry diversity range: {onet_top['industry_diversity'].min():.0f} - {onet_top['industry_diversity'].max():.0f}")
+print(f"\nSalary diversity verification:")
+print(f"Salary range: ${onet_top['median_salary'].min():,.0f} - ${onet_top['median_salary'].max():,.0f}")
+print(f"Unique salary values: {onet_top['median_salary'].nunique()}")
+print(f"Standard deviation: ${onet_top['median_salary'].std():,.0f}")
 
-# Create enhanced interactive bubble chart
+# Create enhanced interactive LOT occupation bubble chart with DIVERSE categories
 fig2 = go.Figure()
 
-# Create shortened labels for better readability
-onet_top['short_name'] = onet_top['ONET_NAME'].str.replace(' / ', '/').str.replace(' and ', ' & ')
+# Create shortened labels for better readability of LOT occupation names
+onet_top['short_name'] = onet_top['LOT_OCCUPATION_NAME'].apply(
+    lambda x: x[:30] + '...' if len(x) > 30 else x
+)
 
 # Scale bubble sizes (area-based) so that job_count maps to perceptible bubble areas
 max_count = onet_top['job_count'].max() if len(onet_top) > 0 else 1
@@ -1208,7 +1284,7 @@ fig2.add_trace(go.Scatter(
         showscale=True
     ),
     customdata=onet_top[['job_count', 'median_salary', 'avg_salary', 'industry_diversity',
-                        'employment_diversity', 'avg_min_experience', 'avg_max_experience', 'ONET_NAME']],
+                        'employment_diversity', 'avg_min_experience', 'avg_max_experience', 'LOT_OCCUPATION_NAME']],
     hovertemplate=(
         '<b>%{customdata[7]}</b><br>' +
         'Median Salary: $%{customdata[1]:,.0f}<br>' +
@@ -1225,11 +1301,11 @@ fig2.add_trace(go.Scatter(
 # Enhanced interactive layout with export capabilities
 fig2.update_layout(
     title={
-        'text': "Enhanced Salary Analysis by ONET Occupation Type",
+        'text': "Diverse LOT Occupation Analysis: Salary vs Job Count Bubble Chart",
         'x': 0.5,
         'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#2C3E50'}
     },
-    xaxis_title="ONET Occupation",
+    xaxis_title="LOT Occupation",
     yaxis_title="Median Salary ($)",
     xaxis=dict(
         tickangle=-60,  # Steeper angle for better readability
