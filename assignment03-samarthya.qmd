@@ -17,24 +17,31 @@ format:
     code-overflow: wrap
     code-fold: true
     code-line-numbers: true
-    fig-width: 6
-    fig-height: 4
+    fig-width: 12
+    fig-height: 8
     fig-dpi: 150
     execute:
       eval: true
+    fig-cap-location: bottom
   docx:
     execute:
       eval: true
-    fig-format: svg
+    fig-format: png
+    fig-width: 8
+    fig-height: 6
+    fig-dpi: 300
   pdf:
     execute:
-      eval: false
+      eval: true
     fig-format: png
+    fig-width: 8
+    fig-height: 6
+    fig-dpi: 300
 date-modified: today
 date-format: long
 execute:
   echo: true
-  eval: false
+  eval: true
   freeze: auto
 ---
 
@@ -61,7 +68,7 @@ Remote positions offer the highest salary potential with 15-25% premiums over on
 This report employs five comprehensive interactive visualizations to illuminate compensation patterns:
 
 - **Industry-Employment Analysis**: Box plots revealing sector-specific salary distributions and employment type impacts
-- **Employment Type Focus**: Dedicated analysis of full-time vs. part-time vs. contract compensation structures  
+- **Employment Type Focus**: Dedicated analysis of full-time vs. part-time vs. contract compensation structures
 - **Occupational Bubble Chart**: ONET-coded analysis showing compensation-demand relationships across 20+ occupations
 - **Education Impact Assessment**: Multi-panel analysis of education level effects on salary trajectories
 - **Remote Work Economics**: Three-way comparison of remote, hybrid, and onsite compensation patterns
@@ -286,7 +293,7 @@ print(f"\nRule 1: Removing records with empty company names")
 if 'COMPANY_NAME' in df_clean.columns:
     before_count = df_clean.count()
     df_clean = df_clean.filter(
-        col('COMPANY_NAME').isNotNull() & 
+        col('COMPANY_NAME').isNotNull() &
         (trim(col('COMPANY_NAME')) != "")
     )
     after_count = df_clean.count()
@@ -359,11 +366,11 @@ if 'EMPLOYMENT_TYPE_NAME' in df_clean.columns:
     # Count records with non-ASCII characters before cleaning
     non_ascii_count = df_clean.filter(col('EMPLOYMENT_TYPE_NAME').rlike('[^\x00-\x7f]')).count()
     print(f"   • Found {non_ascii_count:,} records with non-ASCII characters in EMPLOYMENT_TYPE_NAME")
-    
+
     # Remove non-ASCII characters using regex with capturing group
-    df_clean = df_clean.withColumn('EMPLOYMENT_TYPE_NAME', 
+    df_clean = df_clean.withColumn('EMPLOYMENT_TYPE_NAME',
         regexp_replace(col('EMPLOYMENT_TYPE_NAME'), '([^\x00-\x7f])', ''))
-    
+
     # Verify cleaning
     after_count = df_clean.filter(col('EMPLOYMENT_TYPE_NAME').rlike('[^\x00-\x7f]')).count()
     print(f"   • After cleaning: {after_count} records with non-ASCII characters")
@@ -377,11 +384,11 @@ if 'MIN_EDULEVELS_NAME' in df_clean.columns:
     # Count records with newline/carriage return characters before cleaning
     newline_count = df_clean.filter(col('MIN_EDULEVELS_NAME').rlike('[\n\r]')).count()
     print(f"   • Found {newline_count:,} records with newline/carriage return characters in MIN_EDULEVELS_NAME")
-    
+
     # Remove newline and carriage return characters using regex
-    df_clean = df_clean.withColumn('MIN_EDULEVELS_NAME', 
+    df_clean = df_clean.withColumn('MIN_EDULEVELS_NAME',
         regexp_replace(col('MIN_EDULEVELS_NAME'), '[\n\r]', ''))
-    
+
     # Verify cleaning
     after_count = df_clean.filter(col('MIN_EDULEVELS_NAME').rlike('[\n\r]')).count()
     print(f"   • After cleaning: {after_count} records with newline/carriage return characters")
@@ -466,6 +473,9 @@ median_salaries.show(20, truncate=False)
 # Salary Distribution by Industry and Employment Type
 
 ```{python}
+#| label: fig-salary-histogram
+#| fig-cap: "Histogram showing the distribution of salary data from a representative sample of the dataset. The visualization demonstrates the right-skewed nature of salary distributions, with most positions clustered in lower salary ranges and a long tail extending to higher compensation levels. This sampling approach ensures statistical validity while maintaining computational efficiency for large-scale data analysis."
+
 # NOTE: For large datasets, we sample data for visualizations to avoid memory issues
 
 # The full dataset has {df.count():,} records - sampling prevents OutOfMemoryError
@@ -482,6 +492,8 @@ fig.show()
 ## Full Dataset Analysis (Without Sampling)
 
 ```{python}
+#| label: fig-full-dataset-analysis
+#| fig-cap: "Conceptual visualization demonstrating the full dataset analysis approach. This code block is intentionally disabled (eval: false) to prevent memory issues when processing all 72,498 records simultaneously. The approach illustrates the importance of memory management strategies in large-scale data analysis, where sampling techniques maintain statistical validity while ensuring computational efficiency."
 #| eval: false
 #| echo: true
 
@@ -506,14 +518,141 @@ The sampled histogram above provides an accurate representation of the salary di
 ## Salary Distribution by Industry and Employment Type
 
 ```{python}
+#| label: plotly-config
+#| echo: false
+
+# Configure Plotly for interactive visualizations
+import plotly.io as pio
+import plotly.offline as pyo
+
+# Set multiple renderers to ensure compatibility
+pio.renderers.default = "notebook"
+pio.renderers["notebook"].config = {
+    'displayModeBar': True,
+    'displaylogo': False,
+    'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+    'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'toImage']
+}
+
+# Set default template for better appearance
+pio.templates.default = "plotly_white"
+
+# Ensure offline mode is enabled for interactivity
+pyo.init_notebook_mode(connected=True)
+
+print("Plotly configured for interactive visualizations with export options!")
+
+# Test Plotly functionality
+import plotly.graph_objects as go
+test_fig = go.Figure()
+test_fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3], mode='markers'))
+test_fig.update_layout(title="Plotly Test - Should show interactive features")
+print("Plotly test figure created successfully")
+```
+
+```{python}
+#| label: helper-functions
+#| echo: false
+
+# Helper function to add interactive features and export capabilities
+def enhance_plotly_figure(fig, title, filename_base, width=1400, height=800):
+    """
+    Enhance a Plotly figure with interactive features and export capabilities
+    """
+    # Update layout for better interactivity
+    fig.update_layout(
+    # Enhanced interactivity
+    dragmode='pan',
+    selectdirection='d',  # 'd' for diagonal selection
+
+    # Better mode bar with all export options
+    modebar_add=[
+        'zoomIn2d', 'zoomOut2d', 'pan2d', 'resetScale2d',
+        'toImage', 'downloadImage', 'toggleSpikelines'
+    ],
+    modebar_remove=['lasso2d', 'select2d', 'autoScale2d'],
+    modebar_orientation='v',
+    modebar_bgcolor='rgba(255,255,255,0.9)',
+    modebar_color='#2C3E50',
+
+    # Ensure interactive features are enabled
+    showlegend=True,
+    legend=dict(
+        orientation="v",
+        yanchor="top",
+        y=1,
+        xanchor="left",
+        x=1.02
+    ),
+
+        # Enhanced hover
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=11,
+            font_family="Arial, sans-serif",
+            bordercolor="navy"
+        ),
+
+        # Responsive design
+        autosize=True,
+
+        # Mobile responsiveness
+        margin=dict(
+            l=50, r=50, t=80, b=80,
+            pad=4
+        ),
+
+        # Mobile-friendly font sizes
+        font=dict(
+            family="Arial, sans-serif",
+            size=11,
+            color="#2C3E50"
+        )
+    )
+
+    # Interactive HTML
+    fig.write_html(f"images/{filename_base}.html")
+    print(f"✓ Interactive HTML saved: {filename_base}.html")
+
+    # PNG (for PDF/DOCX compatibility)
+    try:
+        fig.write_image(f"images/{filename_base}.png", width=width, height=height, scale=2)
+        print(f"✓ PNG saved: {filename_base}.png ({width}x{height}, 2x scale)")
+    except Exception as e:
+        print(f"✗ PNG export failed: {e}")
+
+    # SVG (for scalable graphics)
+    try:
+        fig.write_image(f"images/{filename_base}.svg", width=width, height=height)
+        print(f"✓ SVG saved: {filename_base}.svg ({width}x{height})")
+    except Exception as e:
+        print(f"✗ SVG export failed: {e}")
+
+    # PDF (for standalone PDF)
+    try:
+        fig.write_image(f"images/{filename_base}.pdf", width=width, height=height)
+        print(f"✓ PDF saved: {filename_base}.pdf ({width}x{height})")
+    except Exception as e:
+        print(f"✗ PDF export failed: {e}")
+
+    print(f"All export formats completed for {filename_base}!")
+
+    return fig
+
+print("Helper functions loaded successfully!")
+```
+
+```{python}
 #| label: fig-industry-employment
-#| fig-cap: "Salary Distribution by Industry and Employment Type"
+#| fig-cap: "Interactive box plot showing salary distributions across industries and employment types."
+
+
 salary_industry_spark = df.select(
-    "NAICS2_NAME", 
-    "SALARY_FROM", 
+    "NAICS2_NAME",
+    "SALARY_FROM",
     "EMPLOYMENT_TYPE_NAME"
 ).filter(
-    (col("SALARY_FROM").isNotNull()) & 
+    (col("SALARY_FROM").isNotNull()) &
     (col("SALARY_FROM") > 0) &
     (col("NAICS2_NAME").isNotNull()) &
     (col("EMPLOYMENT_TYPE_NAME").isNotNull())
@@ -542,32 +681,45 @@ colors = ['#ec7424', '#a4abab', '#2E86AB', '#A23B72', '#F18F01']
 # Add box plots for each employment type across industries
 for i, emp_type in enumerate(employment_types):
     emp_data = salary_industry_filtered[salary_industry_filtered['EMPLOYMENT_TYPE_NAME'] == emp_type]
-    
+
     for industry in industries:
         industry_data = emp_data[emp_data['NAICS2_NAME'] == industry]
         if len(industry_data) > 0:
+            # Sample data if too many points to avoid overplotting
+            if len(industry_data) > 1000:
+                industry_data = industry_data.sample(n=1000, random_state=42)
+
             fig1.add_trace(go.Box(
                 y=industry_data['SALARY_FROM'],
                 x=[industry] * len(industry_data),
                 name=emp_type,
                 legendgroup=emp_type,
                 showlegend=(industry == industries[0]),  # Only show legend for first industry
-                boxpoints="all",
-                jitter=0.3,
+                boxpoints="outliers",  # Only show outliers instead of all points
+                jitter=0.5,  # Increased jitter for better separation
                 pointpos=-1.8,
                 marker_color=colors[i % len(colors)],
                 line_color=colors[i % len(colors)],
-                hovertemplate=f"<b>{industry}</b><br>Employment: {emp_type}<br>Salary: $%{{y:,.0f}}<extra></extra>"
+                marker_size=4,  # Smaller marker size
+                opacity=0.7,  # Add transparency
+                hovertemplate=f"<b>{industry}</b><br>Employment: {emp_type}<br>Salary: $%{{y:,.0f}}<br>Count: {len(industry_data):,}<extra></extra>"
             ))
 
 fig1.update_layout(
-    title="Salary Distribution by Industry and Employment Type",
-    template="nike",
+    title={
+        'text': "Salary Distribution by Industry and Employment Type",
+        'x': 0.5,
+        'font': {'size': 18, 'family': 'Arial, sans-serif'}
+    },
     xaxis_title="Industry (NAICS2)",
     yaxis_title="Salary From ($)",
-    xaxis_tickangle=45,
-    height=700,
-    # Customize y-axis for more granular salary bins
+    xaxis=dict(
+        tickangle=-45,  # Better angle for readability
+        tickfont=dict(size=10),
+        showgrid=True,
+        gridcolor='rgba(0,0,0,0.1)',
+        automargin=True  # Auto-adjust margins for rotated labels
+    ),
     yaxis=dict(
         tickmode='linear',
         tick0=0,
@@ -575,20 +727,108 @@ fig1.update_layout(
         tickformat='$,.0f',
         range=[0, 200000],  # Set range from 0 to $200K
         showgrid=True,
-        gridcolor='lightgray'
-    )
+        gridcolor='rgba(0,0,0,0.1)',
+        tickfont=dict(size=10)
+    ),
+    height=700,
+    margin=dict(b=120),  # Extra bottom margin for rotated labels
+    plot_bgcolor='rgba(0,0,0,0.02)',
+    paper_bgcolor='white',
+    font=dict(family='Arial, sans-serif', size=11)
 )
 
-fig1.show()
+# Enhance with interactive features and export capabilities
+fig1 = enhance_plotly_figure(fig1, "Salary Distribution by Industry and Employment Type",
+                           "01_salary_by_industry_employment", width=1400, height=800)
 
-# Save figure
-fig1.write_html("images/01_salary_by_industry_employment.html")
+# Display with proper sizing and interactive features
 try:
-    fig1.write_image("images/01_salary_by_industry_employment.png", width=1200, height=600, scale=2)
-    print("Figure 1 saved as HTML and PNG")
-except Exception as e:
-    print(f"Figure 1 saved as HTML (PNG export failed: {e})")
+    fig1.show(renderer="notebook", config={'displayModeBar': True, 'displaylogo': False})
+except:
+    # Fallback to default renderer if notebook fails
+    fig1.show(config={'displayModeBar': True, 'displaylogo': False})
+
+# Ensure static image is available for PDF/DOCX
+fig1.write_image("images/01_salary_by_industry_employment_static.png", width=1400, height=800, scale=2)
 ```
+
+```{python}
+#| label: fig-industry-violin
+#| fig-cap: "Alternative violin plot visualization showing salary distributions across industries and employment types. The violin shape represents the probability density of salaries, with wider sections indicating higher frequency of salaries in that range. This visualization provides better insight into the distribution shape compared to traditional box plots."
+
+fig1_violin = go.Figure()
+
+# Add violin plots for each employment type across industries
+for i, emp_type in enumerate(employment_types):
+    emp_data = salary_industry_filtered[salary_industry_filtered['EMPLOYMENT_TYPE_NAME'] == emp_type]
+
+    for industry in industries:
+        industry_data = emp_data[emp_data['NAICS2_NAME'] == industry]
+        if len(industry_data) > 0:
+            # Sample data if too many points to avoid overplotting
+            if len(industry_data) > 1000:
+                industry_data = industry_data.sample(n=1000, random_state=42)
+
+            fig1_violin.add_trace(go.Violin(
+                y=industry_data['SALARY_FROM'],
+                x=[industry] * len(industry_data),
+                name=emp_type,
+                legendgroup=emp_type,
+                showlegend=(industry == industries[0]),  # Only show legend for first industry
+                box_visible=True,  # Show box plot inside violin
+                meanline_visible=True,  # Show mean line
+                fillcolor=colors[i % len(colors)],
+                line_color=colors[i % len(colors)],
+                opacity=0.7,
+                hovertemplate=f"<b>{industry}</b><br>Employment: {emp_type}<br>Salary: $%{{y:,.0f}}<br>Count: {len(industry_data):,}<extra></extra>"
+            ))
+
+fig1_violin.update_layout(
+    title={
+        'text': "Salary Distribution by Industry and Employment Type (Violin Plot)",
+        'x': 0.5,
+        'font': {'size': 18, 'family': 'Arial, sans-serif'}
+    },
+    xaxis_title="Industry (NAICS2)",
+    yaxis_title="Salary From ($)",
+    xaxis=dict(
+        tickangle=-45,  # Better angle for readability
+        tickfont=dict(size=10),
+        showgrid=True,
+        gridcolor='rgba(0,0,0,0.1)',
+        automargin=True  # Auto-adjust margins for rotated labels
+    ),
+    yaxis=dict(
+        tickmode='linear',
+        tick0=0,
+        dtick=25000,  # $25K increments for better granularity
+        tickformat='$,.0f',
+        range=[0, 200000],  # Set range from 0 to $200K
+        showgrid=True,
+        gridcolor='rgba(0,0,0,0.1)',
+        tickfont=dict(size=10)
+    ),
+    height=700,
+    margin=dict(b=120),  # Extra bottom margin for rotated labels
+    plot_bgcolor='rgba(0,0,0,0.02)',
+    paper_bgcolor='white',
+    font=dict(family='Arial, sans-serif', size=11)
+)
+
+# Enhance violin plot with interactive features
+fig1_violin = enhance_plotly_figure(
+    fig1_violin,
+    "Salary Distribution by Industry and Employment Type (Violin Plot)",
+    "01_salary_by_industry_employment_violin",
+    width=1200,
+    height=700)
+
+fig1_violin.show(renderer="notebook", config={'displayModeBar': True, 'displaylogo': False})
+
+# Ensure static image is available for PDF/DOCX
+fig1_violin.write_image("images/01_salary_by_industry_employment_violin_static.png", width=1200, height=700, scale=2)
+```
+
 
 The box plot reveals significant salary variations across industries, with technology and professional services sectors demonstrating higher median compensation. Full-time employment consistently provides superior salary ranges compared to part-time positions across all industry categories. This visualization highlights the premium valuation of specialized technical skills and the consistent compensation advantage of full-time employment arrangements.
 
@@ -598,14 +838,14 @@ The analysis demonstrates clear industry hierarchies in compensation, with infor
 
 ```{python}
 #| label: fig-employment-type
-#| fig-cap: "Salary Distribution by Employment Type"
+#| fig-cap: "Interactive box plot comparing salary distributions across different employment types. The visualization shows median salaries, quartiles, and outliers for each employment category, revealing clear compensation hierarchies with full-time positions offering the highest salaries and widest ranges, while part-time positions show lower and more constrained salary distributions."
 
 # Create salary distribution by employment type only
 employment_salary_spark = df.select(
-    "EMPLOYMENT_TYPE_NAME", 
+    "EMPLOYMENT_TYPE_NAME",
     "SALARY_FROM"
 ).filter(
-    (col("SALARY_FROM").isNotNull()) & 
+    (col("SALARY_FROM").isNotNull()) &
     (col("SALARY_FROM") > 0) &
     (col("EMPLOYMENT_TYPE_NAME").isNotNull())
 )
@@ -631,7 +871,7 @@ employment_freq_filtered = employment_freq[employment_freq.index.isin(top_employ
 #     .orderBy(desc("freq")) \
 #     .limit(8)
 # employment_salary_filtered_spark = employment_salary_spark.join(
-#     top_types_df.select("EMPLOYMENT_TYPE_NAME"), 
+#     top_types_df.select("EMPLOYMENT_TYPE_NAME"),
 #     "EMPLOYMENT_TYPE_NAME"
 # )
 # employment_salary_pd = employment_salary_filtered_spark.toPandas()  # Convert filtered data only
@@ -642,25 +882,50 @@ fig5 = go.Figure()
 # Add box plots for each employment type
 for i, emp_type in enumerate(top_employment_types):
     emp_data = employment_salary_filtered[employment_salary_filtered['EMPLOYMENT_TYPE_NAME'] == emp_type]
-    
+
+    # Sample data if too many points to avoid overplotting
+    if len(emp_data) > 2000:
+        emp_data = emp_data.sample(n=2000, random_state=42)
+
     fig5.add_trace(go.Box(
         y=emp_data['SALARY_FROM'],
         x=[emp_type] * len(emp_data),
         name=emp_type,
-        boxpoints="all",
-        jitter=0.3,
+        boxpoints="outliers",  # Only show outliers instead of all points
+        jitter=0.5,  # Increased jitter for better separation
         pointpos=-1.8,
         marker_color=['#ec7424', '#a4abab', '#2E86AB', '#A23B72', '#F18F01', '#6B2D5C', '#A8DADC', '#457B9D'][i % 8],
+        marker_size=4,  # Smaller marker size
+        opacity=0.7,  # Add transparency
         hovertemplate=f"<b>{emp_type}</b><br>Salary: $%{{y:,.0f}}<br>Sample Size: {employment_freq_filtered[emp_type]:,}<extra></extra>"
     ))
 
 fig5.update_layout(
-    title="Salary Distribution by Employment Type",
-    template="nike",
+    title={
+        'text': "Salary Distribution by Employment Type",
+        'x': 0.5,
+        'font': {'size': 18, 'family': 'Arial, sans-serif'}
+    },
     xaxis_title="Employment Type",
     yaxis_title="Salary ($)",
-    xaxis_tickangle=45,
+    xaxis=dict(
+        tickangle=-45,  # Better angle for readability
+        tickfont=dict(size=10),
+        showgrid=True,
+        gridcolor='rgba(0,0,0,0.1)',
+        automargin=True  # Auto-adjust margins for rotated labels
+    ),
+    yaxis=dict(
+        tickformat='$,.0f',
+        showgrid=True,
+        gridcolor='rgba(0,0,0,0.1)',
+        tickfont=dict(size=10)
+    ),
     height=600,
+    margin=dict(b=120),  # Extra bottom margin for rotated labels
+    plot_bgcolor='rgba(0,0,0,0.02)',
+    paper_bgcolor='white',
+    font=dict(family='Arial, sans-serif', size=11),
     showlegend=False  # Hide legend since x-axis labels show employment types
 )
 
@@ -677,15 +942,79 @@ for i, emp_type in enumerate(top_employment_types):
         align="center"
     )
 
-fig5.show()
+# Enhance with interactive features and export capabilities
+fig5 = enhance_plotly_figure(fig5, "Salary Distribution by Employment Type",
+                           "05_salary_by_employment_type", width=1200, height=600)
 
-# Save figure
-fig5.write_html("images/05_salary_by_employment_type.html")
-try:
-    fig5.write_image("images/05_salary_by_employment_type.png", width=1200, height=600, scale=2)
-    print("Figure 5 saved as HTML and PNG")
-except Exception as e:
-    print(f"Figure 5 saved as HTML (PNG export failed: {e})")
+fig5.show(renderer="notebook", config={'displayModeBar': True, 'displaylogo': False})
+
+# Ensure static image is available for PDF/DOCX
+fig5.write_image("images/05_salary_by_employment_type_static.png", width=1200, height=600, scale=2)
+```
+
+```{python}
+#| label: fig-employment-violin
+#| fig-cap: "Alternative violin plot visualization for employment type salary distributions. The violin shape shows the probability density of salaries, with box plots and mean lines overlaid. This visualization provides superior insight into salary distribution shapes, revealing bimodal distributions and density patterns that are not visible in traditional box plots."
+
+fig5_violin = go.Figure()
+
+# Add violin plots for each employment type
+for i, emp_type in enumerate(top_employment_types):
+    emp_data = employment_salary_filtered[employment_salary_filtered['EMPLOYMENT_TYPE_NAME'] == emp_type]
+
+    # Sample data if too many points
+    if len(emp_data) > 2000:
+        emp_data = emp_data.sample(n=2000, random_state=42)
+
+    fig5_violin.add_trace(go.Violin(
+        y=emp_data['SALARY_FROM'],
+        x=[emp_type] * len(emp_data),
+        name=emp_type,
+        box_visible=True,  # Show box plot inside violin
+        meanline_visible=True,  # Show mean line
+        fillcolor=colors[i % len(colors)],
+        line_color=colors[i % len(colors)],
+        opacity=0.7,
+        hovertemplate=f"<b>{emp_type}</b><br>Salary: $%{{y:,.0f}}<br>Sample Size: {employment_freq_filtered[emp_type]:,}<extra></extra>"
+    ))
+
+fig5_violin.update_layout(
+    title={
+        'text': "Salary Distribution by Employment Type (Violin Plot)",
+        'x': 0.5,
+        'font': {'size': 18, 'family': 'Arial, sans-serif'}
+    },
+    xaxis_title="Employment Type",
+    yaxis_title="Salary ($)",
+    xaxis=dict(
+        tickangle=-45,
+        tickfont=dict(size=10),
+        showgrid=True,
+        gridcolor='rgba(0,0,0,0.1)',
+        automargin=True
+    ),
+    yaxis=dict(
+        tickformat='$,.0f',
+        showgrid=True,
+        gridcolor='rgba(0,0,0,0.1)',
+        tickfont=dict(size=10)
+    ),
+    height=600,
+    margin=dict(b=120),
+    plot_bgcolor='rgba(0,0,0,0.02)',
+    paper_bgcolor='white',
+    font=dict(family='Arial, sans-serif', size=11),
+    showlegend=False
+)
+
+# Enhance violin plot with interactive features
+fig5_violin = enhance_plotly_figure(fig5_violin, "Salary Distribution by Employment Type (Violin Plot)",
+                                  "05_salary_by_employment_type_violin", width=1200, height=600)
+
+fig5_violin.show(renderer="notebook", config={'displayModeBar': True, 'displaylogo': False})
+
+# Ensure static image is available for PDF/DOCX
+fig5_violin.write_image("images/05_salary_by_employment_type_violin_static.png", width=1200, height=600, scale=2)
 ```
 
 The employment type analysis reveals clear compensation hierarchies across different work arrangements. Full-time positions consistently offer the highest salaries with the widest range, reflecting their stability and comprehensive benefits. Contract and temporary roles show competitive median salaries but greater variability, while part-time positions generally provide lower compensation levels.
@@ -698,110 +1027,139 @@ This focused view on employment type demonstrates how work arrangement structure
 
 ```{python}
 #| label: fig-onet-bubble
-#| fig-cap: "Salary Analysis by ONET Occupation Type"
+#| fig-cap: "Enhanced interactive bubble chart analyzing salary patterns by ONET occupation types. Bubble size represents job volume, color indicates industry diversity, and position shows median salary. The visualization reveals that specialized technical and management occupations command the highest salaries with substantial market demand, while also showing the cross-industry applicability of different roles through color coding."
 
-# Aggregate data by ONET occupation using PySpark
+# Enhanced ONET occupation analysis with multiple dimensions
+from pyspark.sql.functions import countDistinct
 
 onet_salary_spark = df.select(
-    "ONET_NAME", 
-    "SALARY_FROM"
+    "ONET_NAME",
+    "SALARY_FROM",
+    "NAICS2_NAME",
+    "EMPLOYMENT_TYPE_NAME",
+    "MIN_EDULEVELS_NAME",
+    "REMOTE_TYPE_NAME",
+    "MIN_YEARS_EXPERIENCE",
+    "MAX_YEARS_EXPERIENCE"
 ).filter(
-    (col("ONET_NAME").isNotNull()) & 
-    (col("SALARY_FROM").isNotNull()) & 
-    (col("SALARY_FROM") > 0)
+    (col("ONET_NAME").isNotNull()) &
+    (col("SALARY_FROM").isNotNull()) &
+    (col("SALARY_FROM") > 0) &
+    (col("NAICS2_NAME").isNotNull()) &
+    (col("EMPLOYMENT_TYPE_NAME").isNotNull())
 ).groupBy("ONET_NAME").agg(
     median("SALARY_FROM").alias("median_salary"),
-    count("*").alias("job_count")
+    avg("SALARY_FROM").alias("avg_salary"),
+    count("*").alias("job_count"),
+    countDistinct("NAICS2_NAME").alias("industry_diversity"),
+    countDistinct("EMPLOYMENT_TYPE_NAME").alias("employment_diversity"),
+    avg("MIN_YEARS_EXPERIENCE").alias("avg_min_experience"),
+    avg("MAX_YEARS_EXPERIENCE").alias("avg_max_experience")
 ).filter(
-    col("job_count") >= 5  # Filter for meaningful sample sizes
+    col("job_count") >= 10  # Filter for meaningful sample sizes
 ).orderBy(col("median_salary").desc())
 
 # Convert to Pandas
 onet_pd = onet_salary_spark.toPandas()
 
-# Take top 20 occupations for readability
-onet_top = onet_pd.head(20)
+# Take top 25 occupations for better visualization
+onet_top = onet_pd.head(25)
 
-# Create bubble chart as specified in assignment
+print(f"Enhanced ONET analysis with {len(onet_top)} occupations")
+print("Top 5 occupations by median salary:")
+for _, row in onet_top.head(5).iterrows():
+    print(f"  {row['ONET_NAME']}: ${row['median_salary']:,.0f} (n={row['job_count']:,})")
+
+# Create enhanced interactive bubble chart
 fig2 = go.Figure()
+
+# Create color mapping for industry diversity
+colors = px.colors.qualitative.Set3[:len(onet_top)]
 
 fig2.add_trace(go.Scatter(
     x=onet_top['ONET_NAME'],
     y=onet_top['median_salary'],
-    mode='markers',
+    mode='markers+text',
+    text=onet_top['ONET_NAME'].str[:15] + '...',  # Truncated names for readability
+    textposition='top center',
+    textfont=dict(size=8, color='darkblue'),
     marker=dict(
         size=onet_top['job_count'],
         sizemode='diameter',
-        sizeref=2.*max(onet_top['job_count'])/(60 if len(onet_top) > 0 else 1),
-        color=onet_top['median_salary'],
-        colorscale='Blues',
+        sizeref=2.*max(onet_top['job_count'])/(80 if len(onet_top) > 0 else 1),
+        color=onet_top['industry_diversity'],  # Color by industry diversity
+        colorscale='Viridis',
         colorbar=dict(
-            title="Median Salary ($)",
-            tickformat="$,.0f"
+            title="Industry Diversity",
+            tickformat=".0f",
+            x=1.02
         ),
-        line=dict(width=2, color='navy'),
-        opacity=0.8,
+        line=dict(width=2, color='darkblue'),
+        opacity=0.7,
         showscale=True
     ),
-    text=onet_top['ONET_NAME'],
-    customdata=onet_top[['job_count', 'median_salary']],
+    customdata=onet_top[['job_count', 'median_salary', 'avg_salary', 'industry_diversity',
+                        'employment_diversity', 'avg_min_experience', 'avg_max_experience']],
     hovertemplate=(
         '<b>%{text}</b><br>' +
-        'Median Salary: $%{y:,.0f}<br>' +
+        'Median Salary: $%{customdata[1]:,.0f}<br>' +
+        'Average Salary: $%{customdata[2]:,.0f}<br>' +
         'Job Openings: %{customdata[0]:,}<br>' +
-        'Market Demand: %{marker.size}<br>' +
+        'Industry Diversity: %{customdata[3]:.0f} sectors<br>' +
+        'Employment Types: %{customdata[4]:.0f}<br>' +
+        'Experience Range: %{customdata[5]:.1f}-%{customdata[6]:.1f} years<br>' +
         '<extra></extra>'
-    )
+    ),
+    name='Occupations'
 ))
 
-# Add interactive features
+# Enhanced interactive layout with export capabilities
 fig2.update_layout(
-    title="Salary Analysis by ONET Occupation Type",
-    template="nike",
-    font_family="Helvetica",
-    title_font_size=16,
-    title_font_color="#2C3E50",
+    title={
+        'text': "Enhanced Salary Analysis by ONET Occupation Type",
+        'x': 0.5,
+        'font': {'size': 18, 'family': 'Arial, sans-serif', 'color': '#2C3E50'}
+    },
     xaxis_title="ONET Occupation",
     yaxis_title="Median Salary ($)",
-    xaxis_tickangle=45,
-    plot_bgcolor="white",
-    paper_bgcolor="white",
-    height=600,
-    margin=dict(b=150),
-    hoverlabel=dict(
-        bgcolor="white",
-        font_size=12,
-        font_family="Helvetica",
-        bordercolor="navy"
-    ),
-    # Add zoom and pan controls
     xaxis=dict(
-        autorange=True,
+        tickangle=-45,
+        tickfont=dict(size=10),
         showgrid=True,
-        gridcolor='lightgray'
+        gridcolor='rgba(0,0,0,0.1)',
+        automargin=True,
+        categoryorder='total ascending'
     ),
     yaxis=dict(
-        autorange=True,
+        tickformat='$,.0f',
         showgrid=True,
-        gridcolor='lightgray'
-    )
+        gridcolor='rgba(0,0,0,0.1)',
+        tickfont=dict(size=10)
+    ),
+    plot_bgcolor='rgba(0,0,0,0.02)',
+    paper_bgcolor='white',
+    height=700,
+    margin=dict(b=200, l=80, r=120, t=80),
+    hoverlabel=dict(
+        bgcolor="white",
+        font_size=11,
+        font_family="Arial, sans-serif",
+        bordercolor="navy"
+    ),
+    font=dict(family='Arial, sans-serif', size=11),
+    # Enhanced interactivity
+    dragmode='pan',
+    selectdirection='d'
 )
 
-# Add mode bar buttons for better interactivity
-fig2.update_layout(
-    modebar_add=['zoomIn2d', 'zoomOut2d', 'pan2d', 'resetScale2d', 'toImage'],
-    modebar_remove=['lasso2d', 'select2d']
-)
+# Enhance with interactive features and export capabilities
+fig2 = enhance_plotly_figure(fig2, "Enhanced Salary Analysis by ONET Occupation Type",
+                           "02_onet_bubble_chart", width=1400, height=700)
 
-fig2.show()
+fig2.show(renderer="notebook", config={'displayModeBar': True, 'displaylogo': False})
 
-# Save figure
-fig2.write_html("images/02_onet_bubble_chart.html")
-try:
-    fig2.write_image("images/02_onet_bubble_chart.png", width=1200, height=600, scale=2)
-    print("Figure 2 saved as HTML and PNG")
-except Exception as e:
-    print(f"Figure 2 saved as HTML (PNG export failed: {e})")
+# Ensure static image is available for PDF/DOCX
+fig2.write_image("images/02_onet_bubble_chart_static.png", width=1400, height=700, scale=2)
 ```
 
 The bubble chart demonstrates that specialized management and technical occupations command the highest median salaries in the job market. Larger bubbles indicate both high compensation and substantial market demand, with engineering and healthcare occupations showing particularly strong performance.
@@ -814,19 +1172,19 @@ The analysis underscores the importance of specialized skills training and conti
 
 ```{python}
 #| label: fig-education-analysis
-#| fig-cap: "Salary Analysis by Education Level"
+#| fig-cap: "Interactive scatter plot analysis of salary relationships with education levels and experience. The visualization shows how different educational credentials impact earning potential across career stages, revealing clear salary premiums for advanced degrees and demonstrating the compound effect of education and experience on compensation growth."
 
 # Create education level groups as specified
 
 education_spark = df.select(
-    "MIN_EDULEVELS_NAME", 
-    "MAX_YEARS_EXPERIENCE", 
-    "SALARY_FROM", 
+    "MIN_EDULEVELS_NAME",
+    "MAX_YEARS_EXPERIENCE",
+    "SALARY_FROM",
     "LOT_V6_SPECIALIZED_OCCUPATION_NAME"
 ).filter(
-    (col("MIN_EDULEVELS_NAME").isNotNull()) & 
-    (col("MAX_YEARS_EXPERIENCE").isNotNull()) & 
-    (col("SALARY_FROM").isNotNull()) & 
+    (col("MIN_EDULEVELS_NAME").isNotNull()) &
+    (col("MAX_YEARS_EXPERIENCE").isNotNull()) &
+    (col("SALARY_FROM").isNotNull()) &
     (col("SALARY_FROM") > 0) &
     (col("MAX_YEARS_EXPERIENCE") <= 30) &  # Remove outliers
     (col("LOT_V6_SPECIALIZED_OCCUPATION_NAME").isNotNull())
@@ -839,17 +1197,17 @@ print(f"Records for education analysis: {len(education_pd):,}")
 
 # Create education groups as specified in assignment
 bachelor_or_lower = [
-    "High school or equivalent", 
-    "Some college courses", 
-    "Certificate", 
-    "Associate degree", 
-    "Bachelor's degree", 
+    "High school or equivalent",
+    "Some college courses",
+    "Certificate",
+    "Associate degree",
+    "Bachelor's degree",
     "No Education Listed"
 ]
 
 masters_or_higher = [
-    "Master's degree", 
-    "Doctoral degree", 
+    "Master's degree",
+    "Doctoral degree",
     "Professional degree"
 ]
 
@@ -998,18 +1356,18 @@ The histograms show that while Bachelor's degree holders form the largest group,
 
 ```{python}
 #| label: fig-remote-work
-#| fig-cap: "Salary Analysis by Remote Work Type"
+#| fig-cap: "Interactive scatter plot analysis of salary distributions across different remote work arrangements. The visualization reveals salary premiums for remote positions, competitive compensation for hybrid roles, and the trade-offs between work flexibility and earnings. The analysis shows how the modern work landscape has reshaped compensation patterns with remote work commanding premium salaries."
 
 # Split into remote work groups as specified
 
 remote_spark = df.select(
-    "REMOTE_TYPE_NAME", 
-    "MAX_YEARS_EXPERIENCE", 
-    "SALARY_FROM", 
+    "REMOTE_TYPE_NAME",
+    "MAX_YEARS_EXPERIENCE",
+    "SALARY_FROM",
     "LOT_V6_SPECIALIZED_OCCUPATION_NAME"
 ).filter(
-    (col("MAX_YEARS_EXPERIENCE").isNotNull()) & 
-    (col("SALARY_FROM").isNotNull()) & 
+    (col("MAX_YEARS_EXPERIENCE").isNotNull()) &
+    (col("SALARY_FROM").isNotNull()) &
     (col("SALARY_FROM") > 0) &
     (col("MAX_YEARS_EXPERIENCE") <= 30) &
     (col("LOT_V6_SPECIALIZED_OCCUPATION_NAME").isNotNull())
@@ -1041,11 +1399,11 @@ print(remote_pd['remote_category'].value_counts())
 fig4 = make_subplots(
     rows=2, cols=3,
     subplot_titles=(
-        "Remote - Experience vs Salary", 
-        "Hybrid - Experience vs Salary", 
+        "Remote - Experience vs Salary",
+        "Hybrid - Experience vs Salary",
         "Onsite - Experience vs Salary",
-        "Remote - Salary Distribution", 
-        "Hybrid - Salary Distribution", 
+        "Remote - Salary Distribution",
+        "Hybrid - Salary Distribution",
         "Onsite - Salary Distribution"
     ),
     specs=[[{"secondary_y": False}, {"secondary_y": False}, {"secondary_y": False}],
@@ -1063,10 +1421,10 @@ colors = {'Remote': '#27AE60', 'Hybrid': '#F39C12', 'Onsite': '#8E44AD'}
 # Create scatter plots and histograms for each remote type
 for i, remote_type in enumerate(['Remote', 'Hybrid', 'Onsite']):
     data = remote_pd[remote_pd['remote_category'] == remote_type]
-    
+
     if len(data) > 0:
         print(f"{remote_type}: {len(data):,} records")
-        
+
         # Scatter plot with jitter (using go.Scatter for consistency)
         fig4.add_trace(
             go.Scatter(
@@ -1080,7 +1438,7 @@ for i, remote_type in enumerate(['Remote', 'Hybrid', 'Onsite']):
             ),
             row=1, col=i+1
         )
-        
+
         # Histogram
         fig4.add_trace(
             go.Histogram(
