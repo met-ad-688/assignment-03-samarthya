@@ -26,17 +26,25 @@ format:
   docx:
     execute:
       eval: true
+      echo: true
     fig-format: png
     fig-width: 8
     fig-height: 6
     fig-dpi: 300
+    code-fold: true
+    code-overflow: wrap
+    code-line-numbers: true
   pdf:
     execute:
       eval: true
+      echo: true
     fig-format: png
     fig-width: 8
     fig-height: 6
     fig-dpi: 300
+    code-fold: true
+    code-overflow: wrap
+    code-line-numbers: true
 date-modified: today
 date-format: long
 execute:
@@ -52,15 +60,21 @@ This comprehensive analysis examines salary distributions and employment trends 
 ## Key Compensation Disparities Revealed
 
 ### Industry Sector Premiums
+
 Technology and professional services sectors command higher median salaries than manufacturing and retail sectors (@fig-industry-employment). Full-time positions consistently yield higher compensation than part-time roles across all industries, creating a significant earnings gap that favors both high-value sectors and stable employment arrangements.
 
 ### Occupational Compensation Hierarchy
-Specialized technical and management roles exhibit median salaries ranging from $85,000 to $125,000, representing a 2-3x premium over general administrative positions (@fig-onet-bubble). The bubble chart analysis reveals that engineering, healthcare, and technology occupations not only command the highest compensation but also represent the strongest job market demand.
+
+Specialized technical and management roles exhibit diverse median salaries ranging from $45,000 to $125,000, reflecting true market compensation patterns across different LOT occupation categories (@fig-onet-bubble). The enhanced bubble chart analysis, powered by occupation-specific salary imputation, reveals that engineering, healthcare, and technology occupations not only command the highest compensation but also represent the strongest job market demand across 25+ distinct occupation categories.
+
+<!-- Updated to reflect LOT_OCCUPATION_NAME analysis with improved imputation methodology -->
 
 ### Education Investment Returns
+
 Advanced degree holders (Master's and PhD) achieve 20-35% higher salaries than Bachelor's degree recipients, with the compensation premium expanding to 40-50% for those with 10+ years of experience (@fig-education-analysis). The scatter plot analysis demonstrates that higher education provides both immediate salary boosts and accelerated long-term career progression.
 
 ### Remote Work Compensation Dynamics
+
 Remote positions offer the highest salary potential with 15-25% premiums over onsite roles, though with greater earnings variance (@fig-remote-work). Hybrid arrangements provide competitive compensation while maintaining work-life balance, representing an optimal middle ground in the evolving work arrangement landscape.
 
 ## Analytical Foundation
@@ -69,25 +83,28 @@ This report employs five comprehensive interactive visualizations to illuminate 
 
 - **Industry-Employment Analysis**: Box plots revealing sector-specific salary distributions and employment type impacts
 - **Employment Type Focus**: Dedicated analysis of full-time vs. part-time vs. contract compensation structures
-- **Occupational Bubble Chart**: ONET-coded analysis showing compensation-demand relationships across 20+ occupations
+- **Occupational Bubble Chart**: LOT occupation analysis showing compensation-demand relationships across 25+ diverse occupation categories with occupation-specific salary imputation
+<!-- Enhanced from ONET to LOT occupation classification for greater granularity -->
 - **Education Impact Assessment**: Multi-panel analysis of education level effects on salary trajectories
 - **Remote Work Economics**: Three-way comparison of remote, hybrid, and onsite compensation patterns
 
 ## Analytical Approach
 
-This report employs Apache Spark for large-scale data processing, ensuring efficient handling of the comprehensive dataset. Our methodology includes systematic data cleansing, intelligent missing value imputation using group-specific medians, and memory-optimized visualization techniques. All analyses maintain statistical rigor while providing actionable insights for job seekers, employers, and policymakers navigating the evolving labor market landscape.
+This report employs Apache Spark for large-scale data processing, ensuring efficient handling of the comprehensive dataset. 
+
+<!-- Updated to reflect improved imputation strategy using occupation-employment combinations -->
 
 # Introduction
 
 ## Background and Context
 
-The contemporary job market has undergone significant transformation in recent years, driven by technological advancement, changing work patterns, and evolving employer expectations. Understanding salary distributions and employment trends across different sectors, occupations, and work arrangements has become crucial for multiple stakeholders in the labor ecosystem.
+<!-- Google Copied -->
 
-The rapid digitization of work, accelerated by the global pandemic, has fundamentally altered how organizations compensate their workforce. Remote work arrangements, flexible scheduling, and specialized skill requirements have created new compensation paradigms that traditional salary surveys often fail to capture comprehensively.
+The contemporary job market has undergone significant transformation in recent years, driven by technological advancement, changing work patterns, and evolving employer expectations. Understanding salary distributions and employment trends across different sectors, occupations, and work arrangements has become crucial for multiple stakeholders in the labor ecosystem.
 
 ## Research Objectives
 
-This analysis aims to address four primary research questions that capture the multifaceted nature of modern compensation structures:
+This analysis aims to address four primary research questions:
 
 1. **Industry and Employment Type Analysis**: How do salary distributions vary across different industry sectors and employment types? This investigation examines whether certain industries offer premium compensation and how employment arrangements (full-time, part-time, contract) influence earning potential (@fig-industry-employment, @fig-employment-type).
 
@@ -143,7 +160,8 @@ The methodology follows a systematic approach designed to ensure data quality, a
 Each research question is addressed through specific analytical techniques tailored to the nature of the data and research objectives:
 
 - **Box plots** for comparing salary distributions across categorical variables, providing insights into central tendency, spread, and outliers (@fig-industry-employment, @fig-employment-type)
-- **Bubble charts** for examining relationships between multiple quantitative variables, with bubble size representing job volume (@fig-onet-bubble)
+- **Bubble charts** for examining relationships between multiple quantitative variables, with bubble size representing job volume and enhanced LOT occupation categorization (@fig-onet-bubble)
+<!-- Enhanced with LOT_OCCUPATION_NAME for 25+ distinct occupation categories -->
 - **Scatter plots with jitter** for analyzing continuous variable relationships while avoiding overplotting (@fig-education-analysis, @fig-remote-work)
 - **Histograms** for understanding distributional characteristics and identifying skewness or multimodality (@fig-education-analysis, @fig-remote-work)
 
@@ -153,9 +171,15 @@ All visualizations employ custom color schemes and professional formatting to en
 
 The analysis addresses several data quality challenges that are common in large-scale job market datasets:
 
-- **Character Encoding Issues**: Text fields containing non-ASCII characters are systematically cleaned using regex patterns to ensure compatibility across different systems and visualization tools.
+- **Character Encoding Issues**: Text fields containing non-ASCII characters are systematically cleaned using `regex` patterns to ensure compatibility across different systems and visualization tools.
 
-- **Missing Value Handling**: Rather than discarding records with missing salary information, we employ group-specific median imputation. This approach preserves sample size while maintaining the natural variation within employment categories.
+- **Enhanced Missing Value Handling**: Rather than discarding records with missing salary information, we employ a `hierarchical occupation-employment` type specific median imputation strategy. This three-tier approach uses:
+  1. **Primary**: LOT_OCCUPATION_NAME + EMPLOYMENT_TYPE_NAME combination medians
+  2. **Fallback**: EMPLOYMENT_TYPE_NAME only medians  
+  3. **Final**: Overall dataset median
+  This approach preserves sample size while maintaining realistic salary variation across different occupation categories.
+
+<!-- Upgraded from simple employment-type grouping to occupation-employment combinations for more accurate imputation -->
 
 - **Outlier Management**: Experience data is capped at reasonable thresholds (30 years) to prevent extreme values from skewing visualizations and statistical summaries.
 
@@ -171,23 +195,14 @@ The analysis leverages modern data science tools and best practices:
 - **Pandas Integration**: For statistical computations requiring single-machine processing
 - **Jupyter/Quarto Integration**: For reproducible research and automated report generation
 
-## Statistical Rigor
-
-All analyses maintain statistical rigor through:
-
-- **Appropriate Aggregation Methods**: Use of median statistics to reduce the impact of extreme values
-- **Confidence Intervals**: Where applicable, statistical measures include uncertainty estimates
-- **Cross-validation**: Multiple visualization approaches to ensure findings are robust
-- **Data Sampling Strategies**: For large datasets, appropriate sampling techniques balance computational efficiency with statistical validity
-
-This comprehensive methodology ensures that the analysis provides reliable, actionable insights into the complex dynamics of the modern labor market.
+<!-- Added enhanced imputation methodology and LOT occupation classification improvements -->
 
 ```{python}
 #| label: spark-session-initialization
-
+#| code-fold: true
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, count, median, when, isnan, isnull
+from pyspark.sql.functions import col, count, median, when, isnan, isnull, countDistinct
 from pyspark.sql.types import *
 import plotly.express as px
 import plotly.io as pio
@@ -201,6 +216,10 @@ import numpy as np
 import os
 import warnings
 warnings.filterwarnings('ignore')
+
+# Ensure kaleido is available for static image generation (modern Plotly standard)
+import kaleido
+
 
 # Custom Plotly Template
 pio.templates["nike"] = go.layout.Template(
@@ -242,26 +261,55 @@ def get_output_format():
     return os.environ.get('QUARTO_OUTPUT_FORMAT', 'html')
 
 def display_figure(fig, filename_base):
-    """Display figure as interactive for HTML, static image for PDF/DOCX"""
-    from IPython.display import Image, display
-
+    """
+    Enhanced display function for multi-format compatibility using modern Plotly standards
+    - HTML: Interactive Plotly figure  
+    - PDF/DOCX: Static PNG images with high-quality kaleido rendering
+    - Comprehensive error handling and directory management
+    """
     output_format = get_output_format()
+    import sys
+    sys.stderr.write(f"[PDF_LOG] Processing figure {output_format}\n")
+    sys.stderr.flush()
+    print(f"SAMARTHYA::::::Current output format: {output_format}")
+    
+    # Always generate static PNG for PDF/DOCX compatibility
+    static_filename = f"images/{filename_base}.png"
+    html_filename = f"images/{filename_base}.html"
 
+    # Use modern kaleido engine (default, no deprecated engine parameter)
+    fig.write_image(static_filename, 
+                    width=1600, height=1000, 
+                    scale=2)
+   
+    # Verify file was created and has reasonable size
+    if os.path.exists(static_filename):
+        file_size = os.path.getsize(static_filename)
+        print(f"  File size: {file_size:,} bytes")
+        if file_size < 1000:
+            print(f"  Warning: File size seems small, image may not have rendered properly")
+        else:
+            print(f"  Error: Static file was not created")
+    
     if "html" in output_format:
-        # For HTML output, display the interactive plot directly
+        
         fig.show(renderer="notebook", config={
             'displayModeBar': True,
             'displaylogo': False,
             'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
             'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'toImage']
         })
+        
+        # Also save HTML version
+        fig.write_html(html_filename, config={'displayModeBar': True})
+        print(f"Interactive HTML saved: {html_filename}")
+            
     else:
-        # For all other formats (PDF, DOCX), save a static image
-        static_filename = f"images/{filename_base}_static.png"
-        fig.write_image(static_filename, width=1400, height=800, scale=2)
-        # Display the static image
-        display(Image(filename=static_filename))
-        print(f"✓ Static image saved: {static_filename}")
+        sys.stderr.write(f"[PDF_LOG] Processing not HTML figure: {output_format}:{static_filename}\n")
+        sys.stderr.flush()
+        # For PDF/DOCX formats, provide Quarto-compatible image reference
+        if os.path.exists(static_filename):
+           fig.show(rendered="png")
 
 # Initialize Spark Session with increased memory settings
 spark = SparkSession.builder \
@@ -353,10 +401,10 @@ def enhance_plotly_figure(fig, title, filename_base, width=1400, height=800):
 
     # Interactive HTML (for web viewing)
     fig.write_html(f"images/{filename_base}.html")
-    print(f"✓ Interactive HTML saved: {filename_base}.html")
+    print(f"Interactive HTML saved: {filename_base}.html")
 
     # Note: PNG, SVG, and PDF are automatically generated by Plotly's default PNG renderer
-    print(f"✓ Static images automatically generated by Plotly PNG renderer")
+    print(f"Static images automatically generated by Plotly PNG renderer")
 
     return fig
 
@@ -415,7 +463,9 @@ else:
     print(f"   • COMPANY_NAME column not found")
 
 
-# Rule 2: Impute missing SALARY values with occupation + employment type specific medians
+# Rule 2: Enhanced Salary Imputation with Hierarchical Occupation-Employment Strategy
+
+
 print(f"\nRule 2: Imputing missing salary values with occupation + employment type specific medians")
 salary_columns_to_impute = ['SALARY', 'SALARY_FROM', 'SALARY_TO']
 
@@ -681,8 +731,8 @@ fig.update_layout(
 
 # Save interactive HTML
 fig.write_html("images/salary_histogram.html")
-print("✓ Interactive HTML saved: salary_histogram.html")
-print("✓ Static images automatically generated by Plotly PNG renderer")
+print("Interactive HTML saved: salary_histogram.html")
+print("Static images automatically generated by Plotly PNG renderer")
 
 display_figure(fig, "salary_histogram")
 ```
@@ -753,8 +803,8 @@ pio.defaults.scope = "notebook"
 # Set environment variable to force static rendering
 os.environ['PLOTLY_RENDERER'] = 'png'
 
-print("✓ Plotly configured for static PNG rendering")
-print("✓ Ready for PDF/DOCX output generation")
+print("Plotly configured for static PNG rendering")
+print("Ready for PDF/DOCX output generation")
 ```
 
 ```{python}
@@ -1160,13 +1210,12 @@ ORDER BY n DESC
 
 ```{python}
 #| label: fig-onet-bubble
-#| fig-cap: "Enhanced interactive bubble chart analyzing salary patterns by ONET occupation types. Bubble size represents job volume, color indicates industry diversity, and position shows median salary. The visualization reveals that specialized technical and management occupations command the highest salaries with substantial market demand, while also showing the cross-industry applicability of different roles through color coding."
+#| fig-cap: "Enhanced interactive bubble chart analyzing salary patterns by LOT occupation types with improved occupation-specific salary imputation."
+
 
 # Enhanced LOT occupation analysis with IMPROVED salary imputation verification
-from pyspark.sql.functions import countDistinct
-
 # STEP 1: First verify salary diversity after improved imputation
-print("=== VERIFYING SALARY DIVERSITY AFTER IMPROVED IMPUTATION ===")
+# Probably I should have saved the cleansed df
 
 salary_diversity_check = df.select("LOT_OCCUPATION_NAME", "EMPLOYMENT_TYPE_NAME", "SALARY_FROM", "SALARY_TO").filter(
     (col("LOT_OCCUPATION_NAME").isNotNull()) &
@@ -1234,11 +1283,9 @@ lot_occupation_pd = lot_occupation_spark.toPandas()
 
 # Show TOP 25 for maximum diversity
 onet_top = lot_occupation_pd.head(25)
-
-print(f"\n=== FINAL RESULTS WITH IMPROVED IMPUTATION ===")
 print(f"Total LOT occupation categories found: {len(lot_occupation_pd)}")
-print(f"Showing top {len(onet_top)} LOT occupations by job count:")
-print("=" * 80)
+print(f"Showing top {len(onet_top)} LOT occupations by job count:\n")
+
 for i, (_, row) in enumerate(onet_top.iterrows(), 1):
     print(f"{i:2d}. {row['LOT_OCCUPATION_NAME']:<35} | {row['job_count']:>6,} jobs | ${row['median_salary']:>8,.0f}")
 
@@ -1561,8 +1608,8 @@ fig3.update_layout(
 
 # Save interactive HTML
 fig3.write_html("images/03_education_level_analysis.html")
-print("✓ Interactive HTML saved: 03_education_level_analysis.html")
-print("✓ Static images automatically generated by Plotly PNG renderer")
+print("Interactive HTML saved: 03_education_level_analysis.html")
+print("Static images automatically generated by Plotly PNG renderer")
 
 display_figure(fig3, "03_education_level_analysis")
 ```
