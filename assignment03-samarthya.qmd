@@ -13,6 +13,7 @@ format:
   html:
     theme: cerulean
     toc: true
+    lsof: true
     toc-depth: 2
     code-overflow: wrap
     code-fold: true
@@ -27,7 +28,7 @@ format:
     execute:
       eval: true
       echo: true
-    fig-format: png
+    fig-format: svg
     fig-width: 8
     fig-height: 6
     fig-dpi: 300
@@ -38,10 +39,12 @@ format:
     execute:
       eval: true
       echo: true
-    fig-format: png
+    lof: true
     fig-width: 8
     fig-height: 6
     fig-dpi: 300
+    fig-align: left
+    fig-format: svg
     code-fold: true
     code-overflow: wrap
     code-line-numbers: true
@@ -90,7 +93,7 @@ This report employs five comprehensive interactive visualizations to illuminate 
 
 ## Analytical Approach
 
-This report employs Apache Spark for large-scale data processing, ensuring efficient handling of the comprehensive dataset. 
+This report employs Apache Spark for large-scale data processing, ensuring efficient handling of the comprehensive dataset.
 
 <!-- Updated to reflect improved imputation strategy using occupation-employment combinations -->
 
@@ -175,7 +178,7 @@ The analysis addresses several data quality challenges that are common in large-
 
 - **Enhanced Missing Value Handling**: Rather than discarding records with missing salary information, we employ a `hierarchical occupation-employment` type specific median imputation strategy. This three-tier approach uses:
   1. **Primary**: LOT_OCCUPATION_NAME + EMPLOYMENT_TYPE_NAME combination medians
-  2. **Fallback**: EMPLOYMENT_TYPE_NAME only medians  
+  2. **Fallback**: EMPLOYMENT_TYPE_NAME only medians
   3. **Final**: Overall dataset median
   This approach preserves sample size while maintaining realistic salary variation across different occupation categories.
 
@@ -198,30 +201,38 @@ The analysis leverages modern data science tools and best practices:
 <!-- Added enhanced imputation methodology and LOT occupation classification improvements -->
 
 ```{python}
-#| label: spark-session-initialization
+#| label: imports-included
 #| code-fold: true
+#| echo: false
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, count, median, when, isnan, isnull, countDistinct
+from pyspark.sql.functions import *
 from pyspark.sql.types import *
 import plotly.express as px
 import plotly.io as pio
-
-pio.renderers.default = "png"
-
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 import os
 import warnings
+import builtins
+import kaleido
+import csv
+```
+
+```{python}
+#| label: spark-session-initialization
+#| code-fold: true
+#| echo: false
+
 warnings.filterwarnings('ignore')
 
-# Ensure kaleido is available for static image generation (modern Plotly standard)
-import kaleido
-
+# Set default template for better appearance
+pio.templates.default = "plotly_white"
 
 # Custom Plotly Template
+# will test it later
 pio.templates["nike"] = go.layout.Template(
     # LAYOUT
     layout = {
@@ -252,71 +263,73 @@ pio.templates["nike"] = go.layout.Template(
     }
 )
 
+# Common modebar configuration
+MODEBAR_CONFIG = {
+    'displayModeBar': True,
+    'displaylogo': False,
+    'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+    'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'toImage']
+}
+
+# Set up renderers
+pio.renderers["notebook"].config = MODEBAR_CONFIG
+pio.renderers["png"].config = {
+    'width': 1400,
+    'height': 800,
+    'scale': 2
+}
+pio.renderers["svg"].config = {
+    'width': 1400,
+    'height': 800
+}
+
 # Create images directory
 os.makedirs('images', exist_ok=True)
 
-# Helper function to display figures based on output format
-def get_output_format():
-    """Get the current Quarto output format"""
-    return os.environ.get('QUARTO_OUTPUT_FORMAT', 'html')
 
+
+# Set up both renderers
+pio.renderers.default = "svg+notebook"  # Default to interactive for HTML
+print("✓ Renderers configured for both interactive and static output")
+
+# Centralized image generation function
+def generate_all_formats(fig, filename_base):
+    """Generate all image formats (PNG, SVG, HTML) for a figure using configured renderers"""
+    try:
+        # Generate static images using pre-configured renderers
+        fig.write_image(f"images/{filename_base}.png")
+        fig.write_image(f"images/{filename_base}.svg")
+        # Generate interactive HTML
+        fig.write_html(f"images/{filename_base}.html")
+        print(f"✓ All formats generated: {filename_base}")
+        return True
+    except Exception as e:
+        print(f"✗ Image generation failed for {filename_base}: {e}")
+        return False
+
+# Display function that adapts to output format
 def display_figure(fig, filename_base):
-    """
-    Enhanced display function for multi-format compatibility using modern Plotly standards
-    - HTML: Interactive Plotly figure  
-    - PDF/DOCX: Static PNG images with high-quality kaleido rendering
-    - Comprehensive error handling and directory management
-    """
-    output_format = get_output_format()
-    import sys
-    sys.stderr.write(f"[PDF_LOG] Processing figure {output_format}\n")
-    sys.stderr.flush()
-    print(f"SAMARTHYA::::::Current output format: {output_format}")
-    
-    # Always generate static PNG for PDF/DOCX compatibility
-    static_filename = f"images/{filename_base}.png"
-    html_filename = f"images/{filename_base}.html"
+    """Display figure with appropriate renderer based on output format"""
+    # Generate all image formats first
+    generate_all_formats(fig, filename_base)
 
-    # Use modern kaleido engine (default, no deprecated engine parameter)
-    fig.write_image(static_filename, 
-                    width=1600, height=1000, 
-                    scale=2)
-   
-    # Verify file was created and has reasonable size
-    if os.path.exists(static_filename):
-        file_size = os.path.getsize(static_filename)
-        print(f"  File size: {file_size:,} bytes")
-        if file_size < 1000:
-            print(f"  Warning: File size seems small, image may not have rendered properly")
-        else:
-            print(f"  Error: Static file was not created")
-    
-    if "html" in output_format:
-        
-        fig.show(renderer="notebook", config={
-            'displayModeBar': True,
-            'displaylogo': False,
-            'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
-            'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'toImage']
-        })
-        
-        # Also save HTML version
-        fig.write_html(html_filename, config={'displayModeBar': True})
-        print(f"Interactive HTML saved: {html_filename}")
-            
-    else:
-        sys.stderr.write(f"[PDF_LOG] Processing not HTML figure: {output_format}:{static_filename}\n")
-        sys.stderr.flush()
-        # For PDF/DOCX formats, provide Quarto-compatible image reference
-        if os.path.exists(static_filename):
-           fig.show(rendered="png")
+    # Since QUARTO_OUTPUT_FORMAT is not reliably set, we'll use a different approach
+    # We'll always display both static and interactive versions
+    # Quarto will choose which one to use based on the output format
+
+    # Display static image (for PDF/DOCX)
+    print(f"✓ Static image available: images/{filename_base}.png")
+
+    # Display interactive figure (for HTML)
+    print(f"✓ Interactive figure available for HTML")
+    fig.show()
 
 # Initialize Spark Session with increased memory settings
 spark = SparkSession.builder \
     .appName("LightcastData") \
     .config("spark.driver.memory", "4g") \
     .config("spark.executor.memory", "4g") \
-    .config("spark.sql.debug.maxToStringFields", "100") \
+    .config("spark.sql.debug.maxToStringFields", "1000") \
     .config("spark.sql.adaptive.enabled", "true") \
     .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
     .getOrCreate()
@@ -341,6 +354,15 @@ print(f"Total columns: {len(df.columns)}")
 
 ```{python}
 #| label: helper-functions
+#| echo: true
+#| eval: true
+
+output_format = os.environ.get('QUARTO_OUTPUT_FORMAT', 'html')
+print(f"Output format detected: {output_format}")
+```
+
+```{python}
+#| label: enhance-plotly-figure
 #| echo: false
 
 # Helper function to add interactive features and export capabilities
@@ -399,12 +421,8 @@ def enhance_plotly_figure(fig, title, filename_base, width=1400, height=800):
         )
     )
 
-    # Interactive HTML (for web viewing)
-    fig.write_html(f"images/{filename_base}.html")
-    print(f"Interactive HTML saved: {filename_base}.html")
-
-    # Note: PNG, SVG, and PDF are automatically generated by Plotly's default PNG renderer
-    print(f"Static images automatically generated by Plotly PNG renderer")
+    # Generate all image formats using centralized function
+    generate_all_formats(fig, filename_base)
 
     return fig
 
@@ -426,6 +444,15 @@ Spark information carried over from the assignment 2
 
 ```{python}
 #| label: spark-sversion
+
+
+
+
+
+
+
+
+
 #| code-fold: true
 
 print("Spark Session Created Successfully!")
@@ -439,8 +466,6 @@ Importing the functions
 ```{python}
 #| label: importing-the-functions
 #| code-fold: true
-
-from pyspark.sql.functions import col, isnan, when, count, sum as spark_sum, max as spark_max, min as spark_min, avg, stddev, trim, length, median, regexp_replace
 
 # Start with the original dataset
 df_clean = df
@@ -479,7 +504,7 @@ for salary_col in salary_columns_to_impute:
                      None)
                 .otherwise(col(salary_col))
             )
-            
+
             # Calculate median by LOT_OCCUPATION_NAME + EMPLOYMENT_TYPE_NAME for more accurate imputation
             occupation_employment_medians = df_clean.filter(
                 (col(salary_col).isNotNull()) & (col(salary_col) > 0) &
@@ -491,10 +516,10 @@ for salary_col in salary_columns_to_impute:
 
             # Convert to dict for lookup with composite key
             occupation_employment_dict = {
-                (row["LOT_OCCUPATION_NAME"], row["EMPLOYMENT_TYPE_NAME"]): row["group_median"] 
+                (row["LOT_OCCUPATION_NAME"], row["EMPLOYMENT_TYPE_NAME"]): row["group_median"]
                 for row in occupation_employment_medians.collect()
             }
-            
+
             # Calculate fallback medians by employment type only
             employment_medians = df_clean.filter(
                 (col(salary_col).isNotNull()) & (col(salary_col) > 0) &
@@ -502,9 +527,9 @@ for salary_col in salary_columns_to_impute:
             ).groupBy("EMPLOYMENT_TYPE_NAME") \
                 .agg(median(salary_col).alias("group_median")) \
                 .filter(col("group_median").isNotNull())
-                
+
             employment_dict = {
-                row["EMPLOYMENT_TYPE_NAME"]: row["group_median"] 
+                row["EMPLOYMENT_TYPE_NAME"]: row["group_median"]
                 for row in employment_medians.collect()
             }
 
@@ -530,8 +555,6 @@ for salary_col in salary_columns_to_impute:
                     return overall_median
 
             # Register UDF for imputation
-            from pyspark.sql.functions import udf
-            from pyspark.sql.types import FloatType
             get_median_udf = udf(get_occupation_employment_median, FloatType())
 
             # Apply improved imputation
@@ -593,8 +616,7 @@ final_count = df_clean.count()
 total_removed = original_count - final_count
 retention_rate = (final_count / original_count) * 100
 
-print(f"\nDATA CLEANING RESULTS SUMMARY")
-print("="*50)
+print(f"DATA CLEANING RESULTS SUMMARY")
 print(f"Original dataset:  {original_count:,} rows")
 print(f"Cleaned dataset:   {final_count:,} rows")
 if total_removed > 0:
@@ -613,16 +635,12 @@ print(f"\nSimple data cleaning completed. Dataset ready for analysis.")
 df = df_clean
 print(f"\nData cleaning completed. Using cleaned dataset for analysis.")
 
-# Step 4: Final data quality check on cleaned data
-print(f"\n FINAL DATA QUALITY CHECK")
-print("-" * 40)
-
 # Cleansing as learnt
 # Get column names and types (memory-efficient approach)
 columns_and_types = [(col, str(dtype)) for col, dtype in df.dtypes]
 
 # Write schema directly to CSV without creating intermediate Spark DataFrame
-import csv
+
 with open("./data/column_schema.csv", "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow(["Column_Name", "Data_Type"])  # Header
@@ -645,6 +663,7 @@ for col_name in salary_columns:
 # df.toPandas().to_csv("./data/pandas_csv.csv", index=True)
 ```
 
+:::{.content-hidden unless-format="html"}
 > Debug information
 
 ```{python}
@@ -660,8 +679,8 @@ median_salaries = df.filter(col("SALARY").isNotNull() & (col("SALARY") > 0)) \
 
 print("Median salaries by employment type (original data only):")
 median_salaries.show(20, truncate=False)
-
 ```
+:::
 
 # Salary Distribution by Industry and Employment Type
 
@@ -673,7 +692,7 @@ median_salaries.show(20, truncate=False)
 
 # The full dataset has {df.count():,} records - sampling prevents OutOfMemoryError
 # Sample data for histogram to avoid memory issues (sample 10% or max 10,000 records)
-sample_fraction = min(0.1, 10000.0 / df.count())  # Sample 10% or enough for 10k records
+sample_fraction = builtins.min(0.1, 10000.0 / df.count())  # Sample 10% or enough for 10k records
 salary_sample = df.select("SALARY").filter(col("SALARY").isNotNull()).sample(fraction=sample_fraction, seed=42)
 
 # Create interactive histogram with Plotly
@@ -729,83 +748,10 @@ fig.update_layout(
     )
 )
 
-# Save interactive HTML
-fig.write_html("images/salary_histogram.html")
-print("Interactive HTML saved: salary_histogram.html")
-print("Static images automatically generated by Plotly PNG renderer")
-
 display_figure(fig, "salary_histogram")
 ```
 
 ## Salary Distribution by Industry and Employment Type
-
-```{python}
-#| label: plotly-config
-#| echo: false
-
-# Configure Plotly for both interactive and static visualizations
-import plotly.io as pio
-import plotly.offline as pyo
-from IPython.display import Image, display
-import os
-
-# Get Quarto output format
-def get_output_format():
-    """Get the current Quarto output format"""
-    return os.environ.get('QUARTO_OUTPUT_FORMAT', 'html')
-
-# Common modebar configuration
-MODEBAR_CONFIG = {
-    'displayModeBar': True,
-    'displaylogo': False,
-    'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
-    'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'resetScale2d', 'toImage']
-}
-
-# Set up renderers
-pio.renderers["notebook"].config = MODEBAR_CONFIG
-pio.renderers["png"].config = {
-    'width': 1400,
-    'height': 800,
-    'scale': 2
-}
-pio.renderers["svg"].config = {
-    'width': 1400,
-    'height': 800
-}
-
-# Set default template for better appearance
-pio.templates.default = "plotly_white"
-
-# Ensure offline mode is enabled for interactivity
-pyo.init_notebook_mode(connected=True)
-```
-
-```{python}
-#| label: quarto-plotly-config
-#| echo: false
-
-# Configure Quarto to render Plotly as static images for PDF/DOCX
-import plotly.io as pio
-import os
-
-# Configure for static image generation
-pio.renderers["png"].config = {
-    'width': 1400,
-    'height': 800,
-    'scale': 2,
-    'format': 'png'
-}
-
-# Ensure static images are generated
-pio.defaults.scope = "notebook"
-
-# Set environment variable to force static rendering
-os.environ['PLOTLY_RENDERER'] = 'png'
-
-print("Plotly configured for static PNG rendering")
-print("Ready for PDF/DOCX output generation")
-```
 
 ```{python}
 #| label: fig-industry-employment
@@ -909,6 +855,7 @@ fig1 = enhance_plotly_figure(fig1, "Salary Distribution by Industry and Employme
 # Display figure based on output format
 display_figure(fig1, "01_salary_by_industry_employment")
 ```
+
 
 ```{python}
 #| label: fig-industry-violin
@@ -1246,7 +1193,7 @@ print(f"\nOverall salary range medians: ${salary_range['median_from']:,.0f} - ${
 # STEP 2: Apply lenient filtering for LOT occupation analysis
 lot_occupation_spark = df.select(
     "LOT_OCCUPATION_NAME",
-    "SALARY_FROM", 
+    "SALARY_FROM",
     "SALARY_TO",
     "NAICS2_NAME",
     "EMPLOYMENT_TYPE_NAME",
@@ -1265,7 +1212,7 @@ lot_occupation_spark = df.select(
     "avg_salary_range", (col("SALARY_FROM") + col("SALARY_TO")) / 2
 ).groupBy("LOT_OCCUPATION_NAME").agg(
     median("avg_salary_range").alias("median_salary"),
-    avg("avg_salary_range").alias("avg_salary"), 
+    avg("avg_salary_range").alias("avg_salary"),
     count("*").alias("job_count"),
     countDistinct("NAICS2_NAME").alias("industry_diversity"),
     countDistinct("EMPLOYMENT_TYPE_NAME").alias("employment_diversity"),
@@ -1540,7 +1487,7 @@ if len(masters_data) > 0:
 # Update layout with better spacing and readability
 fig3.update_layout(
     title="Salary Analysis by Education Level",
-    template="nike",
+    template="plotly_white",
     font_family="Helvetica",
     title_font_size=18,  # Slightly larger title
     title_font_color="#2C3E50",
@@ -1568,7 +1515,6 @@ fig3.update_yaxes(title_text="Frequency", title_font_size=12, row=2, col=2)
 # Improve subplot title formatting
 fig3.update_annotations(font_size=13, font_weight="bold")
 
-# Add interactive features directly (since enhance_plotly_figure might not be available)
 fig3.update_layout(
     # Enhanced interactivity
     dragmode='pan',
@@ -1605,11 +1551,6 @@ fig3.update_layout(
         color="#2C3E50"
     )
 )
-
-# Save interactive HTML
-fig3.write_html("images/03_education_level_analysis.html")
-print("Interactive HTML saved: 03_education_level_analysis.html")
-print("Static images automatically generated by Plotly PNG renderer")
 
 display_figure(fig3, "03_education_level_analysis")
 ```
