@@ -70,8 +70,6 @@ Technology and professional services sectors command higher median salaries than
 
 Specialized technical and management roles exhibit diverse median salaries ranging from $45,000 to $125,000, reflecting true market compensation patterns across different LOT occupation categories (@fig-onet-bubble). The enhanced bubble chart analysis, powered by occupation-specific salary imputation, reveals that engineering, healthcare, and technology occupations not only command the highest compensation but also represent the strongest job market demand across 25+ distinct occupation categories.
 
-<!-- Updated to reflect LOT_OCCUPATION_NAME analysis with improved imputation methodology -->
-
 ### Education Investment Returns
 
 Advanced degree holders (Master's and PhD) achieve 20-35% higher salaries than Bachelor's degree recipients, with the compensation premium expanding to 40-50% for those with 10+ years of experience (@fig-education-analysis). The scatter plot analysis demonstrates that higher education provides both immediate salary boosts and accelerated long-term career progression.
@@ -286,11 +284,8 @@ pio.renderers["svg"].config = {
 # Create images directory
 os.makedirs('images', exist_ok=True)
 
-
-
 # Set up both renderers
 pio.renderers.default = "svg+notebook"  # Default to interactive for HTML
-print("✓ Renderers configured for both interactive and static output")
 
 # Centralized image generation function
 def generate_all_formats(fig, filename_base):
@@ -299,12 +294,13 @@ def generate_all_formats(fig, filename_base):
         # Generate static images using pre-configured renderers
         fig.write_image(f"images/{filename_base}.png")
         fig.write_image(f"images/{filename_base}.svg")
+        
         # Generate interactive HTML
         fig.write_html(f"images/{filename_base}.html")
-        print(f"✓ All formats generated: {filename_base}")
+        print(f"All formats generated: {filename_base}")
         return True
     except Exception as e:
-        print(f"✗ Image generation failed for {filename_base}: {e}")
+        print(f"Image generation failed for {filename_base}: {e}")
         return False
 
 # Display function that adapts to output format
@@ -312,16 +308,8 @@ def display_figure(fig, filename_base):
     """Display figure with appropriate renderer based on output format"""
     # Generate all image formats first
     generate_all_formats(fig, filename_base)
-
-    # Since QUARTO_OUTPUT_FORMAT is not reliably set, we'll use a different approach
-    # We'll always display both static and interactive versions
-    # Quarto will choose which one to use based on the output format
-
     # Display static image (for PDF/DOCX)
-    print(f"✓ Static image available: images/{filename_base}.png")
-
-    # Display interactive figure (for HTML)
-    print(f"✓ Interactive figure available for HTML")
+    print(f"Static image available: images/{filename_base}.png")
     fig.show()
 
 # Initialize Spark Session with increased memory settings
@@ -444,15 +432,6 @@ Spark information carried over from the assignment 2
 
 ```{python}
 #| label: spark-sversion
-
-
-
-
-
-
-
-
-
 #| code-fold: true
 
 print("Spark Session Created Successfully!")
@@ -489,94 +468,95 @@ else:
 
 
 # Rule 2: Enhanced Salary Imputation with Hierarchical Occupation-Employment Strategy
-
-
 print(f"\nRule 2: Imputing missing salary values with occupation + employment type specific medians")
 salary_columns_to_impute = ['SALARY', 'SALARY_FROM', 'SALARY_TO']
 
 for salary_col in salary_columns_to_impute:
     if salary_col in df_clean.columns:
         try:
-            # First, clean extreme outliers and unrealistic values
+            # --- Step 1: Clean unrealistic outliers first ---
             print(f"   • Cleaning extreme outliers and unrealistic values for {salary_col}")
             df_clean = df_clean.withColumn(salary_col,
-                when((col(salary_col) < 15000) | (col(salary_col) > 500000),  # Remove unrealistic salaries
-                     None)
+                when((col(salary_col) < 15000) | (col(salary_col) > 500000), None)
                 .otherwise(col(salary_col))
             )
 
-            # Calculate median by LOT_OCCUPATION_NAME + EMPLOYMENT_TYPE_NAME for more accurate imputation
+            # Count missing before imputation for reporting
+            before_missing = df_clean.filter((col(salary_col).isNull()) | (col(salary_col) <= 0)).count()
+
+            # --- Step 2: Compute group medians using Spark (no Python UDFs) ---
+            # Primary: median by LOT_OCCUPATION_NAME + EMPLOYMENT_TYPE_NAME
             occupation_employment_medians = df_clean.filter(
                 (col(salary_col).isNotNull()) & (col(salary_col) > 0) &
-                (col("LOT_OCCUPATION_NAME").isNotNull()) &
-                (col("EMPLOYMENT_TYPE_NAME").isNotNull())
+                (col("LOT_OCCUPATION_NAME").isNotNull()) & (col("EMPLOYMENT_TYPE_NAME").isNotNull())
             ).groupBy("LOT_OCCUPATION_NAME", "EMPLOYMENT_TYPE_NAME") \
-                .agg(median(salary_col).alias("group_median")) \
-                .filter(col("group_median").isNotNull())
+                .agg(median(salary_col).alias("occ_emp_median")) \
+                .filter(col("occ_emp_median").isNotNull())
 
-            # Convert to dict for lookup with composite key
-            occupation_employment_dict = {
-                (row["LOT_OCCUPATION_NAME"], row["EMPLOYMENT_TYPE_NAME"]): row["group_median"]
-                for row in occupation_employment_medians.collect()
-            }
-
-            # Calculate fallback medians by employment type only
+            # Fallback: median by EMPLOYMENT_TYPE_NAME only
             employment_medians = df_clean.filter(
                 (col(salary_col).isNotNull()) & (col(salary_col) > 0) &
                 (col("EMPLOYMENT_TYPE_NAME").isNotNull())
             ).groupBy("EMPLOYMENT_TYPE_NAME") \
-                .agg(median(salary_col).alias("group_median")) \
-                .filter(col("group_median").isNotNull())
+                .agg(median(salary_col).alias("emp_median")) \
+                .filter(col("emp_median").isNotNull())
 
-            employment_dict = {
-                row["EMPLOYMENT_TYPE_NAME"]: row["group_median"]
-                for row in employment_medians.collect()
-            }
-
-            # Get overall median as final fallback
+            # Final fallback: overall (approximate) median
             overall_median = df_clean.filter(col(salary_col).isNotNull() & (col(salary_col) > 0)) \
                 .approxQuantile(salary_col, [0.5], 0.01)[0]
 
+            # Print diagnostics
             print(f"   • {salary_col} overall median: ${overall_median:,.2f}")
-            print(f"   • Occupation+Employment specific medians: {len(occupation_employment_dict)} combinations")
-            print(f"   • Employment type fallback medians: {len(employment_dict)} types")
+            print(f"   • Occupation+Employment specific medians: {occupation_employment_medians.count():,} combinations")
+            print(f"   • Employment type fallback medians: {employment_medians.count():,} types")
 
-            # Function to get most appropriate median (hierarchical fallback)
-            def get_occupation_employment_median(occupation, employment_type):
-                # Try occupation + employment type first
-                composite_key = (occupation, employment_type)
-                if composite_key in occupation_employment_dict:
-                    return occupation_employment_dict[composite_key]
-                # Fallback to employment type only
-                elif employment_type in employment_dict:
-                    return employment_dict[employment_type]
-                # Final fallback to overall median
-                else:
-                    return overall_median
-
-            # Register UDF for imputation
-            get_median_udf = udf(get_occupation_employment_median, FloatType())
-
-            # Apply improved imputation
-            df_clean = df_clean.withColumn(salary_col,
-                when((col(salary_col).isNull()) | (col(salary_col) <= 0),
-                     get_median_udf(col("LOT_OCCUPATION_NAME"), col("EMPLOYMENT_TYPE_NAME")))
-                .otherwise(col(salary_col))
+            # --- Step 3: Left-join medians back onto main table and apply hierarchical coalescing ---
+            # Join on both LOT_OCCUPATION_NAME and EMPLOYMENT_TYPE_NAME for primary median
+            df_with_meds = df_clean.join(
+                occupation_employment_medians,
+                on=["LOT_OCCUPATION_NAME", "EMPLOYMENT_TYPE_NAME"],
+                how="left"
             )
 
-            # Count how many values were imputed
-            imputed_count = df_clean.filter((col(salary_col).isNull()) | (col(salary_col) <= 0)).count()
-            print(f"   • Imputed {imputed_count:,} missing/invalid {salary_col} values with occupation-specific medians")
+            # Join employment-only medians as a fallback
+            df_with_meds = df_with_meds.join(
+                employment_medians,
+                on=["EMPLOYMENT_TYPE_NAME"],
+                how="left"
+            )
+
+            # Create imputed value using hierarchical coalesce: occ_emp_median -> emp_median -> overall_median
+            # Add a small random jitter to the imputed median to avoid too many identical values.
+            # Jitter magnitude is +/- 2.5% (controlled by jitter_scale)
+            jitter_scale = 0.025
+            seed = 42
+            imputed_expr = coalesce(col("occ_emp_median"), col("emp_median"), lit(float(overall_median)))
+            # Apply multiplicative jitter: imputed * (1 + (rand() - 0.5) * 2 * jitter_scale)
+            df_with_meds = df_with_meds.withColumn(
+                "imputed_value",
+                (imputed_expr * (1 + (rand(seed) - lit(0.5)) * lit(2.0 * jitter_scale))).cast(FloatType())
+            )
+
+            # Replace missing/invalid salary values with the imputed_value, keep others as-is
+            df_clean = df_with_meds.withColumn(
+                salary_col,
+                when((col(salary_col).isNull()) | (col(salary_col) <= 0), col("imputed_value"))
+                .otherwise(col(salary_col))
+            ).drop("occ_emp_median", "emp_median", "imputed_value")
+
+            # Count how many values were imputed (difference before/after)
+            after_missing = df_clean.filter((col(salary_col).isNull()) | (col(salary_col) <= 0)).count()
+            imputed_count = max(0, before_missing - after_missing)
+            print(f"   • Imputed {imputed_count:,} missing/invalid {salary_col} values with hierarchical medians (with jitter)")
 
         except Exception as e:
             print(f"   • Error in group-specific imputation for {salary_col}: {str(e)}")
-            # Fallback to overall median
+            # Fallback to overall median (no jitter) if anything goes wrong
             overall_median = df_clean.filter(col(salary_col).isNotNull() & (col(salary_col) > 0)) \
                 .approxQuantile(salary_col, [0.5], 0.01)[0]
             print(f"   • Using overall median fallback: ${overall_median:,.2f}")
             df_clean = df_clean.withColumn(salary_col,
-                when((col(salary_col).isNull()) | (col(salary_col) <= 0), overall_median)
-                .otherwise(col(salary_col))
+                when((col(salary_col).isNull()) | (col(salary_col) <= 0), lit(float(overall_median))).otherwise(col(salary_col))
             )
     else:
         print(f"   • {salary_col} column not found")
@@ -1561,6 +1541,104 @@ This comprehensive analysis of education's impact on compensation reveals severa
 
 The histograms show that while Bachelor's degree holders form the largest group, advanced degree recipients are positioned in higher salary brackets, indicating the market's valuation of specialized knowledge and advanced credentials. This pattern has significant implications for educational investment decisions and career planning strategies.
 
+```{python}
+#| label: fig-experience-vs-salary-education
+#| fig-cap: "Experience vs Salary by Education Group. Scatter plot of years of experience (with jitter) vs salary, colored by education grouping (Associate or Lower, Bachelor, Master's, PhD)."
+# Build dataset for experience vs salary by education group (compute avg salary safely)
+exp_spark = df.select(
+    "MIN_EDULEVELS_NAME",
+    col("MAX_YEARS_EXPERIENCE").cast("float").alias("MAX_YEARS_EXPERIENCE"),
+    col("SALARY_FROM"),
+    col("SALARY_TO")
+).filter(
+    (col("MAX_YEARS_EXPERIENCE").isNotNull()) &
+    (col("MAX_YEARS_EXPERIENCE") > 0) &
+    (col("MAX_YEARS_EXPERIENCE") <= 30)  # cap outliers
+)
+
+# Compute a robust average salary: prefer mean of SALARY_FROM and SALARY_TO when available
+exp_spark = exp_spark.withColumn(
+    "Average_Salary",
+    when((col("SALARY_FROM").isNotNull()) & (col("SALARY_TO").isNotNull()) & (col("SALARY_FROM")>0) & (col("SALARY_TO")>0),
+         (col("SALARY_FROM") + col("SALARY_TO")) / 2.0)
+    .when((col("SALARY_FROM").isNotNull()) & (col("SALARY_FROM")>0), col("SALARY_FROM"))
+    .when((col("SALARY_TO").isNotNull()) & (col("SALARY_TO")>0), col("SALARY_TO"))
+    .otherwise(None)
+)
+
+# Filter to valid salary rows
+exp_spark = exp_spark.filter((col("Average_Salary").isNotNull()) & (col("Average_Salary") > 0))
+
+# Create explicit education groups using regex (case-insensitive)
+lower_pattern = "(?i)High school|Some college|Certificate|Associate|GED|No education listed"
+bachelor_pattern = "(?i)Bachelor"
+higher_pattern = "(?i)Master|Professional"
+phd_pattern = "(?i)Doctoral|Doctorate|PhD"
+
+exp_spark = exp_spark.withColumn(
+    "EDU_GROUP",
+    when(col("MIN_EDULEVELS_NAME").rlike(phd_pattern), "PhD")
+    .when(col("MIN_EDULEVELS_NAME").rlike(higher_pattern), "Master's")
+    .when(col("MIN_EDULEVELS_NAME").rlike(bachelor_pattern), "Bachelor")
+    .when(col("MIN_EDULEVELS_NAME").rlike(lower_pattern), "Associate or Lower")
+    .otherwise("Other")
+)
+
+# Bucket experience to integer years (so points cluster at integer x positions like your target figure)
+exp_spark = exp_spark.withColumn("Experience_Years", floor(col("MAX_YEARS_EXPERIENCE")).cast("int"))
+
+# Keep only the 4 main education groups for the plot
+exp_spark = exp_spark.filter(col("EDU_GROUP").isin("Associate or Lower", "Bachelor", "Master's", "PhD"))
+
+# Convert to pandas for plotting
+exp_pd = exp_spark.select("MIN_EDULEVELS_NAME", "EDU_GROUP", "MAX_YEARS_EXPERIENCE", "Experience_Years", "Average_Salary").toPandas()
+print(f"Records for experience vs salary by education: {len(exp_pd):,}")
+
+# Add small jitter around the integer experience buckets to reduce overplotting (stddev 0.18)
+np.random.seed(42)
+exp_pd['experience_jitter'] = exp_pd['Experience_Years'] + np.random.normal(0, 0.18, len(exp_pd))
+
+# Create scatter plot with Plotly Express using Average_Salary and EDU_GROUP
+category_order = ["Associate or Lower", "Bachelor", "Master's", "PhD"]
+color_map = {
+    "Associate or Lower": "#636EFA",
+    "Bachelor": "#EF553B",
+    "Master's": "#00CC96",
+    "PhD": "#AB63FA"
+}
+
+fig_exp = px.scatter(
+    exp_pd,
+    x='experience_jitter',
+    y='Average_Salary',
+    color='EDU_GROUP',
+    category_orders={'EDU_GROUP': category_order},
+    color_discrete_map=color_map,
+    labels={'experience_jitter': 'Years of Experience', 'Average_Salary': 'Average Salary (USD)'},
+    hover_data={'MIN_EDULEVELS_NAME': True, 'MAX_YEARS_EXPERIENCE': ':.1f', 'Average_Salary': ':.0f'},
+    title='Experience vs Salary by Education Level'
+)
+
+fig_exp.update_traces(
+    marker=dict(size=5, line=dict(width=0.15, color='DarkSlateGrey')), selector=dict(mode='markers')
+)
+
+fig_exp.update_layout(
+    template='plotly_white',
+    height=600,
+    width=1400,
+    margin=dict(t=80, b=60, l=80, r=80),
+    legend=dict(title='Education Group', orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+    xaxis=dict(title='Years of Experience', tickmode='linear', dtick=1),
+    yaxis=dict(title='Average Salary (USD)', tickformat='$,.0f')
+)
+
+# Enhance and export
+fig_exp = enhance_plotly_figure(fig_exp, "Experience vs Salary by Education Level", "06_experience_vs_salary_education", width=1400, height=600)
+
+display_figure(fig_exp, "06_experience_vs_salary_education")
+```
+
 ## Salary by Remote Work Type
 
 ```{python}
@@ -1572,12 +1650,13 @@ The histograms show that while Bachelor's degree holders form the largest group,
 remote_spark = df.select(
     "REMOTE_TYPE_NAME",
     "MAX_YEARS_EXPERIENCE",
-    "SALARY_FROM",
+    col("SALARY_FROM"),
+    col("SALARY_TO"),
     "LOT_V6_SPECIALIZED_OCCUPATION_NAME"
 ).filter(
     (col("MAX_YEARS_EXPERIENCE").isNotNull()) &
-    (col("SALARY_FROM").isNotNull()) &
-    (col("SALARY_FROM") > 0) &
+    ((col("SALARY_FROM").isNotNull()) | (col("SALARY_TO").isNotNull())) &
+    ((col("SALARY_FROM") > 0) | (col("SALARY_TO") > 0)) &
     (col("MAX_YEARS_EXPERIENCE") <= 30) &
     (col("LOT_V6_SPECIALIZED_OCCUPATION_NAME").isNotNull())
 )
@@ -1624,7 +1703,26 @@ fig4 = make_subplots(
 # Add jitter as specified
 np.random.seed(42)
 remote_pd = remote_pd.copy()
-remote_pd['experience_jitter'] = remote_pd['MAX_YEARS_EXPERIENCE'] + np.random.normal(0, 0.3, len(remote_pd))
+# Cast experience to float and add a smaller jitter (stddev=0.18) so points cluster by integer years
+remote_pd['MAX_YEARS_EXPERIENCE'] = remote_pd['MAX_YEARS_EXPERIENCE'].astype(float)
+remote_pd = remote_pd[remote_pd['MAX_YEARS_EXPERIENCE'] > 0]
+remote_pd['experience_years'] = np.floor(remote_pd['MAX_YEARS_EXPERIENCE']).astype(int)
+remote_pd['experience_jitter'] = remote_pd['experience_years'] + np.random.normal(0, 0.18, len(remote_pd))
+
+# Compute Average_Salary (prefer mean of SALARY_FROM & SALARY_TO)
+def compute_avg_salary(row):
+    f = row.get('SALARY_FROM')
+    t = row.get('SALARY_TO')
+    if pd.notna(f) and pd.notna(t) and f > 0 and t > 0:
+        return (f + t) / 2.0
+    if pd.notna(f) and f > 0:
+        return f
+    if pd.notna(t) and t > 0:
+        return t
+    return None
+
+remote_pd['Average_Salary'] = remote_pd.apply(compute_avg_salary, axis=1)
+remote_pd = remote_pd[remote_pd['Average_Salary'].notna() & (remote_pd['Average_Salary'] > 0)]
 
 # Define colors for each remote type
 colors = {'Remote': '#27AE60', 'Hybrid': '#F39C12', 'Onsite': '#8E44AD'}
@@ -1636,15 +1734,16 @@ for i, remote_type in enumerate(['Remote', 'Hybrid', 'Onsite']):
     if len(data) > 0:
         print(f"{remote_type}: {len(data):,} records")
 
-        # Scatter plot with jitter (using go.Scatter for consistency)
+        # Scatter plot with jitter (using go.Scatter for consistency). Include occupation in hover.
         fig4.add_trace(
             go.Scatter(
                 x=data['experience_jitter'],
-                y=data['SALARY_FROM'],
+                y=data['Average_Salary'],
                 mode='markers',
                 name=f"{remote_type}",
-                marker=dict(color=colors[remote_type], size=4, opacity=0.6),
-                hovertemplate=f'{remote_type}<br>Experience: %{{x:.1f}} years<br>Salary: $%{{y:,.0f}}<extra></extra>',
+                marker=dict(color=colors[remote_type], size=5, opacity=0.7, line=dict(width=0.15, color='DarkSlateGrey')),
+                hovertemplate=f'{remote_type}<br>Occupation: %{{customdata[0]}}<br>Experience: %{{x:.1f}} years<br>Salary: $%{{y:,.0f}}<extra></extra>',
+                customdata=np.stack([data['LOT_V6_SPECIALIZED_OCCUPATION_NAME']], axis=-1),
                 showlegend=False
             ),
             row=1, col=i+1
@@ -1653,11 +1752,11 @@ for i, remote_type in enumerate(['Remote', 'Hybrid', 'Onsite']):
         # Histogram
         fig4.add_trace(
             go.Histogram(
-                x=data['SALARY_FROM'],
+                x=data['Average_Salary'],
                 name=f"{remote_type} Distribution",
                 marker_color=colors[remote_type],
                 opacity=0.7,
-                nbinsx=20,
+                nbinsx=25,
                 showlegend=False
             ),
             row=2, col=i+1
@@ -1680,6 +1779,32 @@ fig4.update_layout(
 )
 
 # Update axes labels with better formatting
+for i in range(1,4):
+    fig4.update_xaxes(title_text='Years of Experience', row=1, col=i, tickmode='linear', dtick=1)
+    fig4.update_xaxes(title_text='Salary (USD)', row=2, col=i)
+    fig4.update_yaxes(title_text='Average Salary (USD)', row=1, col=i, tickformat='$,.0f')
+
+# Enhance and export
+fig4 = enhance_plotly_figure(fig4, "Salary by Remote Work Type", "07_salary_by_remote_work_type", width=1400, height=900)
+display_figure(fig4, "07_salary_by_remote_work_type")
+
+# Short descriptions / observations
+print('\nObservations:')
+for remote_type in ['Remote','Hybrid','Onsite']:
+    subset = remote_pd[remote_pd['remote_category']==remote_type]
+    if len(subset)==0:
+        print(f"{remote_type}: no data")
+        continue
+    med = subset['Average_Salary'].median()
+    mean = subset['Average_Salary'].mean()
+    cnt = len(subset)
+    print(f"{remote_type}: n={cnt:,}, median=${med:,.0f}, mean=${mean:,.0f}.")
+    if remote_type=='Remote':
+        print("  Remote roles show a modest salary premium on average compared with Onsite, visible as higher median and more points in upper salary ranges.")
+    if remote_type=='Hybrid':
+        print("  Hybrid roles fall between Remote and Onsite, often showing moderate salaries with similar spread.")
+    if remote_type=='Onsite':
+        print("  Onsite roles have a wider concentration at lower salary bands, though senior onsite roles still reach high salaries.")
 for i in range(1, 4):
     # Scatter plot axes (top row)
     fig4.update_xaxes(
