@@ -1664,10 +1664,11 @@ raw_remote_counts.show(40, truncate=False)
 
 # Also show total counts per categorized group (Remote/Hybrid/Onsite) from raw df
 def categorize_remote_spark(col_expr):
-        return when((col_expr.isNull()) | (col_expr == '') | (col_expr == '[None]'), 'Onsite') \
-                .when(col_expr.rlike('(?i)Remote'), 'Remote') \
-                .when(col_expr.rlike('(?i)Hybrid'), 'Hybrid') \
-                .otherwise('Onsite')
+    # Prefer Hybrid when both words appear (e.g., 'Hybrid Remote') — check Hybrid first
+    return when((col_expr.isNull()) | (col_expr == '') | (col_expr == '[None]'), 'Onsite') \
+        .when(col_expr.rlike('(?i)Hybrid'), 'Hybrid') \
+        .when(col_expr.rlike('(?i)Remote'), 'Remote') \
+        .otherwise('Onsite')
 
 cat_counts = (
         df.select(categorize_remote_spark(col('REMOTE_TYPE_NAME')).alias('remote_cat'))
@@ -1702,10 +1703,11 @@ print(f"Records for remote work analysis: {len(remote_pd):,}")
 def categorize_remote(remote_type):
     if pd.isna(remote_type) or remote_type == '[None]' or remote_type == '' or remote_type is None:
         return 'Onsite'
-    elif 'Remote' in str(remote_type):
-        return 'Remote'
+    # Prefer 'Hybrid' when both words appear (e.g., 'Hybrid Remote')
     elif 'Hybrid' in str(remote_type):
         return 'Hybrid'
+    elif 'Remote' in str(remote_type):
+        return 'Remote'
     else:
         return 'Onsite'
 
@@ -1931,6 +1933,46 @@ for remote_type in ['Remote', 'Hybrid', 'Onsite']:
     data = remote_pd[remote_pd['remote_category'] == remote_type]['Average_Salary']
     if len(data) > 0:
         print(f"{remote_type}: Mean=${data.mean():,.0f}, Median=${data.median():,.0f}, Count={len(data):,}")
+
+# Combined scatter: MAX_YEARS_EXPERIENCE vs Average_Salary colored by remote group
+# Use a small horizontal jitter on experience and a small vertical jitter on salary (-500..500)
+print('\nBuilding combined scatter: MAX_YEARS_EXPERIENCE vs Average_Salary (colored by remote group)')
+combined_pd = remote_pd.copy()
+combined_pd['MAX_YEARS_EXPERIENCE'] = combined_pd['MAX_YEARS_EXPERIENCE'].astype(float)
+combined_pd = combined_pd[combined_pd['MAX_YEARS_EXPERIENCE'] > 0]
+
+np.random.seed(42)
+combined_pd['x_jitter'] = combined_pd['MAX_YEARS_EXPERIENCE'] + np.random.normal(0, 0.12, len(combined_pd))
+combined_pd['y_jitter'] = combined_pd['Average_Salary'] + np.random.uniform(-500, 500, len(combined_pd))
+
+fig_comb = px.scatter(
+    combined_pd,
+    x='x_jitter',
+    y='y_jitter',
+    color='remote_category',
+    color_discrete_map={'Remote': '#27AE60', 'Hybrid': '#F39C12', 'Onsite': '#8E44AD'},
+    labels={'x_jitter': 'Years of Experience (jittered)', 'y_jitter': 'Average Salary (USD)', 'remote_category': 'Remote Work Type'},
+    hover_data={'LOT_V6_SPECIALIZED_OCCUPATION_NAME': True, 'MAX_YEARS_EXPERIENCE': ':.1f', 'Average_Salary': ':.0f'},
+    opacity=0.75,
+    height=600,
+    width=1400
+)
+
+fig_comb.update_traces(marker=dict(size=5, line=dict(width=0.15, color='DarkSlateGrey')))
+fig_comb.update_layout(title='Experience vs Average Salary by Remote Work Type', xaxis_title='Years of Experience', yaxis_title='Average Salary (USD)', xaxis=dict(tickmode='linear', dtick=1), yaxis=dict(tickformat='$,.0f'))
+
+# Export and display
+fig_comb = enhance_plotly_figure(fig_comb, 'Experience vs Average Salary by Remote Work Type (combined)', '07b_experience_vs_salary_by_remote', width=1400, height=600)
+display_figure(fig_comb, '07b_experience_vs_salary_by_remote')
+
+# Short summary for the combined scatter
+print('\nCombined scatter summary:')
+for rc in ['Remote','Hybrid','Onsite']:
+    sub = combined_pd[combined_pd['remote_category']==rc]
+    if len(sub)==0:
+        print(f"{rc}: no rows after filtering")
+        continue
+    print(f"{rc}: n={len(sub):,}, median=${sub['Average_Salary'].median():,.0f}, mean=${sub['Average_Salary'].mean():,.0f}")
 ```
 
 Remote work positions demonstrate the highest salary potential with considerable variance, indicating premium compensation for distributed work capabilities. Hybrid arrangements provide competitive salaries while maintaining work flexibility, whereas onsite positions cluster around lower median compensation levels.
