@@ -1575,7 +1575,8 @@ exp_spark = exp_spark.filter((col("Average_Salary").isNotNull()) & (col("Average
 lower_pattern = "(?i)High school|Some college|Certificate|Associate|GED|No education listed|Secondary"
 bachelor_pattern = "(?i)Bachelor|Bachelors|BA|BS"
 higher_pattern = "(?i)Master|Masters|Professional|MSc|MA|MS"
-phd_pattern = "(?i)Doctoral|Doctorate|PhD|DPhil|Doctor of|MD|M.D.|Doctor"
+# include dotted and spaced variants like 'Ph.D.' and 'Ph.D. or professional degree'
+phd_pattern = "(?i)Doctoral|Doctorate|PhD|Ph\.D\.|DPhil|Doctor of|MD|M\.D\.|Doctor|Ph\.D"
 
 exp_spark = exp_spark.withColumn(
     "EDU_GROUP",
