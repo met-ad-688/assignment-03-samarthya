@@ -1570,10 +1570,12 @@ exp_spark = exp_spark.withColumn(
 exp_spark = exp_spark.filter((col("Average_Salary").isNotNull()) & (col("Average_Salary") > 0))
 
 # Create explicit education groups using regex (case-insensitive)
-lower_pattern = "(?i)High school|Some college|Certificate|Associate|GED|No education listed"
-bachelor_pattern = "(?i)Bachelor"
-higher_pattern = "(?i)Master|Professional"
-phd_pattern = "(?i)Doctoral|Doctorate|PhD"
+
+# More comprehensive regexes to capture common variants (case-insensitive)
+lower_pattern = "(?i)High school|Some college|Certificate|Associate|GED|No education listed|Secondary"
+bachelor_pattern = "(?i)Bachelor|Bachelors|BA|BS"
+higher_pattern = "(?i)Master|Masters|Professional|MSc|MA|MS"
+phd_pattern = "(?i)Doctoral|Doctorate|PhD|DPhil|Doctor of|MD|M.D.|Doctor"
 
 exp_spark = exp_spark.withColumn(
     "EDU_GROUP",
@@ -1591,8 +1593,11 @@ exp_spark = exp_spark.withColumn("Experience_Years", floor(col("MAX_YEARS_EXPERI
 exp_spark = exp_spark.filter(col("EDU_GROUP").isin("Associate or Lower", "Bachelor", "Master's", "PhD"))
 
 # Convert to pandas for plotting
+
 exp_pd = exp_spark.select("MIN_EDULEVELS_NAME", "EDU_GROUP", "MAX_YEARS_EXPERIENCE", "Experience_Years", "Average_Salary").toPandas()
 print(f"Records for experience vs salary by education: {len(exp_pd):,}")
+# Debug: show counts per education group so we can confirm PhD mapping
+print("EDU_GROUP counts:\n", exp_pd['EDU_GROUP'].value_counts(dropna=False))
 
 # Add small jitter around the integer experience buckets to reduce overplotting (stddev 0.18)
 np.random.seed(42)
@@ -1643,7 +1648,33 @@ display_figure(fig_exp, "06_experience_vs_salary_education")
 
 ```{python}
 #| label: fig-remote-work
-#| fig-cap: "Interactive scatter plot analysis of salary distributions across different remote work arrangements. The visualization reveals salary premiums for remote positions, competitive compensation for hybrid roles, and the trade-offs between work flexibility and earnings. The analysis shows how the modern work landscape has reshaped compensation patterns with remote work commanding premium salaries."
+#| fig-cap: "Interactive scatter plot analysis of salary distributions across different remote work arrangements."
+
+# Quick raw counts from `df` for debugging (counts are from the original Spark DataFrame before later filters)
+raw_remote_counts = (
+        df.select('REMOTE_TYPE_NAME')
+            .na.fill('[None]', subset=['REMOTE_TYPE_NAME'])
+            .groupBy('REMOTE_TYPE_NAME')
+            .count()
+            .orderBy(col('count').desc())
+)
+print('Top REMOTE_TYPE_NAME values (raw df):')
+raw_remote_counts.show(40, truncate=False)
+
+# Also show total counts per categorized group (Remote/Hybrid/Onsite) from raw df
+def categorize_remote_spark(col_expr):
+        return when((col_expr.isNull()) | (col_expr == '') | (col_expr == '[None]'), 'Onsite') \
+                .when(col_expr.rlike('(?i)Remote'), 'Remote') \
+                .when(col_expr.rlike('(?i)Hybrid'), 'Hybrid') \
+                .otherwise('Onsite')
+
+cat_counts = (
+        df.select(categorize_remote_spark(col('REMOTE_TYPE_NAME')).alias('remote_cat'))
+            .groupBy('remote_cat')
+            .count()
+)
+print('\nCategorized counts from raw df:')
+cat_counts.show(truncate=False)
 
 # Split into remote work groups as specified
 
@@ -1707,7 +1738,7 @@ remote_pd = remote_pd.copy()
 remote_pd['MAX_YEARS_EXPERIENCE'] = remote_pd['MAX_YEARS_EXPERIENCE'].astype(float)
 remote_pd = remote_pd[remote_pd['MAX_YEARS_EXPERIENCE'] > 0]
 remote_pd['experience_years'] = np.floor(remote_pd['MAX_YEARS_EXPERIENCE']).astype(int)
-remote_pd['experience_jitter'] = remote_pd['experience_years'] + np.random.normal(0, 0.18, len(remote_pd))
+remote_pd['experience_jitter'] = remote_pd['experience_years'] + np.random.normal(-0.2, 0.2, len(remote_pd))
 
 # Compute Average_Salary (prefer mean of SALARY_FROM & SALARY_TO)
 def compute_avg_salary(row):
@@ -1733,17 +1764,20 @@ for i, remote_type in enumerate(['Remote', 'Hybrid', 'Onsite']):
 
     if len(data) > 0:
         print(f"{remote_type}: {len(data):,} records")
+        # Add small vertical jitter to Average_Salary for plotting (-500..+500 uniform)
+        y_jitter = np.random.uniform(-500, 500, len(data))
+        data_plot_y = data['Average_Salary'].values + y_jitter
 
-        # Scatter plot with jitter (using go.Scatter for consistency). Include occupation in hover.
+        # Scatter plot with jitter (using go.Scatter). Keep the hover showing the true Average_Salary
         fig4.add_trace(
             go.Scatter(
                 x=data['experience_jitter'],
-                y=data['Average_Salary'],
+                y=data_plot_y,
                 mode='markers',
                 name=f"{remote_type}",
-                marker=dict(color=colors[remote_type], size=5, opacity=0.7, line=dict(width=0.15, color='DarkSlateGrey')),
-                hovertemplate=f'{remote_type}<br>Occupation: %{{customdata[0]}}<br>Experience: %{{x:.1f}} years<br>Salary: $%{{y:,.0f}}<extra></extra>',
-                customdata=np.stack([data['LOT_V6_SPECIALIZED_OCCUPATION_NAME']], axis=-1),
+                marker=dict(color=colors[remote_type], size=5, opacity=0.75, line=dict(width=0.15, color='DarkSlateGrey')),
+                hovertemplate=f'{remote_type}<br>Occupation: %{{customdata[0]}}<br>Experience: %{{x:.1f}} years<br>Salary: $%{{customdata[1]:,.0f}}<extra></extra>',
+                customdata=np.stack([data['LOT_V6_SPECIALIZED_OCCUPATION_NAME'], data['Average_Salary']], axis=-1),
                 showlegend=False
             ),
             row=1, col=i+1
@@ -1850,10 +1884,50 @@ fig4 = enhance_plotly_figure(fig4, "Salary Analysis by Remote Work Type",
 
 display_figure(fig4, "04_remote_work_analysis")
 
-# Summary statistics by remote type
+print('\n--- Remote group summaries (top-level) ---')
+
+if len(remote_pd) == 0:
+    print('remote_pd is empty (no rows after filtering)')
+else:
+    group_stats = remote_pd.groupby('remote_category').agg(
+        count=('Average_Salary','size'),
+        median_salary=('Average_Salary','median'),
+        mean_salary=('Average_Salary','mean')
+    ).reset_index()
+    print(group_stats.to_string(index=False))
+
+for cat in ['Remote','Hybrid','Onsite']:
+    subset = remote_pd[remote_pd['remote_category']==cat]
+    print(f"\nSample rows for {cat} (up to 5): {len(subset):,} rows total")
+    if len(subset)>0:
+        try:
+            display(subset[['REMOTE_TYPE_NAME','LOT_V6_SPECIALIZED_OCCUPATION_NAME','MAX_YEARS_EXPERIENCE','experience_years','Average_Salary']].head(5))
+        except Exception:
+            print(subset[['REMOTE_TYPE_NAME','LOT_V6_SPECIALIZED_OCCUPATION_NAME','MAX_YEARS_EXPERIENCE','experience_years','Average_Salary']].head(5).to_string(index=False))
+    else:
+        print('  (no rows)')
+
+print('\n--- Education group summaries (top-level) ---')
+if 'exp_pd' in globals() and isinstance(exp_pd, pd.DataFrame):
+    edu_stats = exp_pd.groupby('EDU_GROUP').agg(
+        count=('Average_Salary','size'),
+        median_salary=('Average_Salary','median')
+    ).reset_index()
+    print(edu_stats.to_string(index=False))
+    for g in exp_pd['EDU_GROUP'].unique():
+        sub = exp_pd[exp_pd['EDU_GROUP']==g]
+        print(f"\nSample rows for EDU_GROUP={g} (up to 5): {len(sub):,} rows total")
+        try:
+            display(sub[['MIN_EDULEVELS_NAME','MAX_YEARS_EXPERIENCE','Experience_Years','Average_Salary']].head(5))
+        except Exception:
+            print(sub[['MIN_EDULEVELS_NAME','MAX_YEARS_EXPERIENCE','Experience_Years','Average_Salary']].head(5).to_string(index=False))
+else:
+    print('exp_pd not available for education debug (it may be in a different scope).')
+
+# Summary statistics by remote type (original)
 print("\nSalary summary by remote work type:")
 for remote_type in ['Remote', 'Hybrid', 'Onsite']:
-    data = remote_pd[remote_pd['remote_category'] == remote_type]['SALARY_FROM']
+    data = remote_pd[remote_pd['remote_category'] == remote_type]['Average_Salary']
     if len(data) > 0:
         print(f"{remote_type}: Mean=${data.mean():,.0f}, Median=${data.median():,.0f}, Count={len(data):,}")
 ```
